@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+
+import argparse
+from pathlib import Path
+from biobricks.brick import Brick
+
+parser = argparse.ArgumentParser(
+  prog='biobrick-setup-source',
+  description='Set up symlinks to given bricks and write the brick URLs to a manifest file.',
+)
+
+parser.add_argument( '-o', '--output-dir', nargs=1  , required=True )
+parser.add_argument( 'brick-name',         nargs='+', )
+
+args = parser.parse_args()
+
+brick_data = []
+for name in getattr( args, 'brick-name' ):
+  b = Brick.Resolve(name)
+  brick_data.append( {
+    'path': b.path(),
+    'name': name,
+    'url': b.url()
+  })
+
+brick_data.sort(key=lambda x: x['url'])
+
+output_dir = Path(args.output_dir[0])
+if not output_dir.exists():
+  output_dir.mkdir( parents=True )
+
+with open( output_dir / 'brick-manifest', 'w') as manifest:
+  for brick in brick_data:
+    data_symlink = (output_dir / brick['name'])
+    if data_symlink.exists() and data_symlink.is_symlink():
+      data_symlink.unlink()
+    data_symlink.symlink_to( brick['path'] / 'brick' )
+    manifest.write(brick['url'] + "\n")

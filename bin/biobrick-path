@@ -1,0 +1,24 @@
+#!/bin/sh
+#
+# Requires:
+#   python3: python3
+#     pip3 install biobricks
+#   perl: perl
+#   coreutils: cat
+
+set -eu
+
+if [ "$#" -ne 1 ] || [ -z "$1" ]; then
+	cat <<EOF >&2
+Usage:
+  $0 brick-name
+EOF
+	exit 1
+fi
+
+BRICK_NAME="$1"
+
+BRICK_PATH=`python3 -c 'import sys; import biobricks.api as bb; print( "PATH_SENTINEL:{}".format( bb.path(sys.argv[1]) / "brick" ) )' "$BRICK_NAME" \
+	| perl -ne 'print if s/^PATH_SENTINEL://'`
+
+echo "$BRICK_PATH"
