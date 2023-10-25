@@ -7,5 +7,6 @@ CURDIR=`dirname "$CURSCRIPT"`
 
 cat <<EOF
 PATH=$CURDIR/bin:\$PATH
+PATH=$CURDIR/vendor/parallel/src:\$PATH
 export PATH
 EOF
