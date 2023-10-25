@@ -1,0 +1,3 @@
+[submodule "vendor/parallel"]
+	path = vendor/parallel
+	url = https://git.savannah.gnu.org/git/parallel.git
