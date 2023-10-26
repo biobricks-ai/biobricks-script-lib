@@ -1,0 +1,35 @@
+#!/bin/sh
+
+set -eu
+
+if [ "$#" -ne 1 ] || [ -z "$1" ]; then
+	cat <<EOF >&2
+Usage:
+  $0 file
+EOF
+	exit 1
+fi
+
+LC_ALL=C
+export LC_ALL
+
+OLD_TMPDIR="${TMPDIR:-/tmp}"
+FILE="$1"
+if find "$FILE" -size 1G -print | grep -qm1 '.'; then
+	sort -o "$FILE" "$FILE"
+else
+	DIR="`dirname $FILE`"
+	# parsort uses TMPDIR:
+	#
+	# Need to set TMPDIR because it could be set to a different FS with
+	# less space.
+	export TMPDIR="$(mktemp -d -p $DIR)"
+	TEMPFILE="$TMPDIR/parsort-output"
+	touch "$TEMPFILE"
+	chmod --reference="$FILE" "$TEMPFILE"
+
+	parsort "$FILE" >> "$TEMPFILE"
+	mv "$TEMPFILE" "$FILE"
+	rm -Rf "$TMPDIR"
+fi
+
