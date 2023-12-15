@@ -34,5 +34,10 @@ with open( output_dir / 'brick-manifest', 'w') as manifest:
     data_symlink = (output_dir / brick['name'])
     if data_symlink.exists() and data_symlink.is_symlink():
       data_symlink.unlink()
-    data_symlink.symlink_to( brick['path'] / 'brick' )
+    if (brick['path'] / 'brick').exists():
+      data_symlink.symlink_to( brick['path'] / 'brick' )
+    elif (brick['path'] / 'data').exists():
+      data_symlink.symlink_to( brick['path'] / 'data' )
+    else:
+      raise Exception('Unknown directory for brick data for brick {name}'.format( name = brick['name']))
     manifest.write(brick['url'] + "\n")
