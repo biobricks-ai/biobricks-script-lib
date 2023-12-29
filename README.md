@@ -25,3 +25,9 @@ When using `git clone`, be sure to use get all submodules:
 ```shell
 git clone --recurse-submodules git@github.com:biobricks-ai/my-brick.git
 ```
+
+or with an already cloned repo:
+
+```shell
+git submodule update --init --recursive
+```
