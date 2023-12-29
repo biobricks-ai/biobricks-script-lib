@@ -86,16 +86,15 @@ if [ -s $PART_LIST ]; then
 		## NOTE: Using cat below does not take into account limits of argument count / length.
 		JAVA_OPTIONS=$RDF2HDTCAT_JAVA_OPTIONS \
 			hdtCat.sh $RDF2HDTCAT_HDTCAT_OPTIONS $(cat $PART_LIST) $RDF_HDT_FINAL
+		## Remove temporary files and directories inside of $PART_LIST.
+		< $PART_LIST parallel 'rm {} && rmdir {//}'
 	else
 		## Single file
 		mv -v $(cat $PART_LIST) $RDF_HDT_FINAL
 	fi
+	rm $PART_LIST ## Remove temporary file.
 else
 	echo "$0: Empty partitions of RDF input: possibly missing N-Triples input on STDIN?" >&2
-	rm $PART_LIST
+	rm $PART_LIST ## Remove temporary file.
 	exit 1
 fi
-
-## Remove temporary files and directories.
-< $PART_LIST parallel 'rm {} && rmdir {//}'
-rm $PART_LIST
