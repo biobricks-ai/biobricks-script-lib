@@ -9,7 +9,7 @@ RDF2HDTCAT_RDF2HDT_OPTS_DEFAULT='-p'
 RDF2HDTCAT_JAVA_OPTS_DEFAULT='-Xmx6g'
 RDF2HDTCAT_HDTCAT_OPTS_DEFAULT=''
 
-if [ "$#" -ne 1 ] || [ -z "$1" ]; then
+if [ "$#" -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
 	cat <<EOF >&2
 # NAME
 
@@ -17,7 +17,7 @@ if [ "$#" -ne 1 ] || [ -z "$1" ]; then
 
 # SYNOPSIS
 
-  rdf2hdtcat-parpipe output.hdt < rdf.nt
+  rdf2hdtcat-parpipe base-uri output.hdt < rdf.nt
 
 # DESCRIPTION
 
@@ -58,7 +58,8 @@ EOF
 	exit 1
 fi
 
-RDF_HDT_FINAL="$1"
+RDF_HDT_BASE_URI="$1"
+RDF_HDT_FINAL="$2"
 
 export RDF2HDTCAT_PARALLEL_OPTS=${RDF2HDTCAT_PARALLEL_OPTS:-$RDF2HDTCAT_PARALLEL_OPTS_DEFAULT}
 export RDF2HDTCAT_RDF2HDT_OPTS=${RDF2HDTCAT_RDF2HDT_OPTS:-$RDF2HDTCAT_RDF2HDT_OPTS_DEFAULT}
@@ -74,9 +75,10 @@ export RDF2HDTCAT_HDTCAT_OPTS=${RDF2HDTCAT_HDTCAT_OPTS:-$RDF2HDTCAT_HDTCAT_OPTS_
 ## (due to not having one-pass processing).
 ## See <https://github.com/rdfhdt/hdt-cpp/issues/233#issuecomment-1054008231>.
 PART_LIST=$(mktemp --suffix=.rdf2hdtcat-part.lst)
+export RDF_HDT_BASE_URI
 parallel $RDF2HDTCAT_PARALLEL_OPTS --pipe --cat --keep-order '
 	PART_TEMP=$(mktemp -d) \
-		&& rdf2hdt $RDF2HDTCAT_RDF2HDT_OPTS -f ntriples {} $PART_TEMP/part_{#}.hdt \
+		&& rdf2hdt $RDF2HDTCAT_RDF2HDT_OPTS -B $RDF_HDT_BASE_URI -f ntriples {} $PART_TEMP/part_{#}.hdt \
 		&& echo $PART_TEMP/part_{#}.hdt' > $PART_LIST;
 
 if [ -s $PART_LIST ]; then
