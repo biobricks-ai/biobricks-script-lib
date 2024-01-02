@@ -84,6 +84,8 @@ if [ -s $PART_LIST ]; then
 		## Merge the partitioned .hdt files together.
 		##
 		## NOTE: Using cat below does not take into account limits of argument count / length.
+		##
+		## `JAVA_OPTIONS` is used inside of `hdtCat.sh` to set the options to java(1).
 		JAVA_OPTIONS=$RDF2HDTCAT_JAVA_OPTS \
 			hdtCat.sh $RDF2HDTCAT_HDTCAT_OPTS $(cat $PART_LIST) $RDF_HDT_FINAL
 		## Remove temporary files and directories inside of $PART_LIST.
