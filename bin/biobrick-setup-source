@@ -3,31 +3,83 @@
 import argparse
 from pathlib import Path
 from biobricks.brick import Brick
+from biobricks.local_bb import LocalBB
+
+prog = 'biobrick-setup-source'
 
 parser = argparse.ArgumentParser(
-  prog='biobrick-setup-source',
+  prog=prog,
   description='Set up symlinks to given bricks and write the brick URLs to a manifest file.',
+  epilog=rf"""
+  Examples:
+
+    {prog} [--from-deps] brick...
+
+    {prog} --pull-all-deps
+  """,
+  formatter_class=argparse.RawDescriptionHelpFormatter
 )
 
-parser.add_argument( '-o', '--output-dir', nargs=1  , required=True )
-parser.add_argument( 'brick-name',         nargs='+', )
+parser.add_argument('-o', '--output-dir', nargs=1,   required=True,
+                    help='Output directory for where to place the brick symlinks')
+parser.add_argument('brick-name',         nargs='*',
+                    help='Name of bricks to process.')
+parser.add_argument('--from-deps', action='store_true',
+                    help='Use the .bb dependencies to resolve bricks by name if they exist')
+parser.add_argument('--pull-all-deps', action='store_true',
+                    help='Pull all .bb dependencies')
+
 
 args = parser.parse_args()
 
-brick_data = []
-for name in getattr( args, 'brick-name' ):
-  b = Brick.Resolve(name)
-  brick_data.append( {
-    'path': b.path(),
-    'name': name,
-    'url': b.url()
-  })
+requested_bricks = getattr(args, 'brick-name')
 
+if args.from_deps and args.pull_all_deps:
+  raise Exception("Only choose one of --from-deps or --pull-all-deps")
+elif args.from_deps and not len(requested_bricks):
+  raise Exception("Missing bricks to request from deps")
+elif args.pull_all_deps:
+  if len(requested_bricks):
+    raise Exception("Should not request bricks when pulling all deps")
+elif not len(requested_bricks):
+  raise Exception("Missing bricks to request")
+
+# Possible state:
+#
+# pull_all_deps = True  ; requested_bricks = []
+#
+# from_deps     = True  ; requested_bricks = [ a, ... ]
+# from_deps     = False ; requested_bricks = [ a, ... ]
+
+bricks = []
+
+# Add deps with a filter
+if args.from_deps or args.pull_all_deps:
+  keep_f = None
+  if args.from_deps:
+    keep_f = lambda x: x.name in requested_bricks
+  elif args.pull_all_deps:
+    keep_f = lambda x: True
+  bricks += list(filter(keep_f, LocalBB(path=Path('.')).get_depencies()))
+
+# Add the rest of the bricks by resolving
+rest_of_the_bricks = set(requested_bricks) - set(map(lambda x: x.name, bricks))
+bricks += [Brick.Resolve(name) for name in rest_of_the_bricks]
+
+def to_brick_data(brick: Brick):
+  return {
+    'path': brick.path(),
+    'name': brick.name,
+    'url': brick.url()
+  }
+
+
+brick_data = [to_brick_data(brick) for brick in bricks]
 brick_data.sort(key=lambda x: x['url'])
 
 output_dir = Path(args.output_dir[0])
 if not output_dir.exists():
-  output_dir.mkdir( parents=True )
+  output_dir.mkdir(parents=True)
 
 with open( output_dir / 'brick-manifest', 'w') as manifest:
   for brick in brick_data:
