@@ -6,8 +6,6 @@ export LC_ALL=C
 
 RDF2HDTCAT_PARALLEL_OPTS_DEFAULT='-j4 --block-size 500M'
 RDF2HDTCAT_RDF2HDT_OPTS_DEFAULT='-p'
-RDF2HDTCAT_JAVA_OPTS_DEFAULT='-Xmx6g'
-RDF2HDTCAT_HDTCAT_OPTS_DEFAULT=''
 
 if [ "$#" -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
 	cat <<EOF >&2
@@ -42,18 +40,6 @@ splitting the input into partitions and then merging them.
 
     Default: '$RDF2HDTCAT_RDF2HDT_OPTS_DEFAULT'
 
-  * RDF2HDTCAT_JAVA_OPTS:
-
-    Passed to java(1).
-
-    Default: '$RDF2HDTCAT_JAVA_OPTS_DEFAULT'
-
-  * RDF2HDTCAT_HDTCAT_OPTS:
-
-    Passed to hdtCat.sh.
-
-    Default: '$RDF2HDTCAT_HDTCAT_OPTS_DEFAULT'
-
 EOF
 	exit 1
 fi
@@ -63,9 +49,6 @@ RDF_HDT_FINAL="$2"
 
 export RDF2HDTCAT_PARALLEL_OPTS=${RDF2HDTCAT_PARALLEL_OPTS:-$RDF2HDTCAT_PARALLEL_OPTS_DEFAULT}
 export RDF2HDTCAT_RDF2HDT_OPTS=${RDF2HDTCAT_RDF2HDT_OPTS:-$RDF2HDTCAT_RDF2HDT_OPTS_DEFAULT}
-
-export RDF2HDTCAT_JAVA_OPTS=${RDF2HDTCAT_JAVA_OPTS:-$RDF2HDTCAT_JAVA_OPTS_DEFAULT}
-export RDF2HDTCAT_HDTCAT_OPTS=${RDF2HDTCAT_HDTCAT_OPTS:-$RDF2HDTCAT_HDTCAT_OPTS_DEFAULT}
 
 ## Partition the data on `STDIN` into blocks that each get processed with
 ## `rdf2hdt`.
@@ -82,20 +65,10 @@ parallel $RDF2HDTCAT_PARALLEL_OPTS --pipe --cat --keep-order '
 		&& echo $PART_TEMP/part_{#}.hdt' > $PART_LIST;
 
 if [ -s $PART_LIST ]; then
-	if [ "$(wc -l < $PART_LIST)" -gt 1 ]; then
-		## Merge the partitioned .hdt files together.
-		##
-		## NOTE: Using cat below does not take into account limits of argument count / length.
-		##
-		## `JAVA_OPTIONS` is used inside of `hdtCat.sh` to set the options to java(1).
-		JAVA_OPTIONS=$RDF2HDTCAT_JAVA_OPTS \
-			hdtCat.sh $RDF2HDTCAT_HDTCAT_OPTS $(cat $PART_LIST) $RDF_HDT_FINAL
-		## Remove temporary files and directories inside of $PART_LIST.
-		< $PART_LIST parallel 'rm {} && rmdir {//}'
-	else
-		## Single file
-		mv -v $(cat $PART_LIST) $RDF_HDT_FINAL
-	fi
+	## Use hdtcat-file-list to merge the HDT files
+	hdtcat-file-list $PART_LIST $RDF_HDT_FINAL
+	## Remove temporary files and directories inside of $PART_LIST.
+	< $PART_LIST parallel 'rm {} && rmdir {//}'
 	rm $PART_LIST ## Remove temporary file.
 else
 	echo "$0: Empty partitions of RDF input: possibly missing N-Triples input on STDIN?" >&2

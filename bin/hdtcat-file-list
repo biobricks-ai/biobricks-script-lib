@@ -1,0 +1,65 @@
+#!/bin/bash
+
+set -euo pipefail;
+
+export LC_ALL=C
+
+RDF2HDTCAT_JAVA_OPTS_DEFAULT='-Xmx6g'
+RDF2HDTCAT_HDTCAT_OPTS_DEFAULT=''
+
+if [ "$#" -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
+	cat <<EOF >&2
+# NAME
+
+  hdtcat-file-list - merge HDT files from a list file
+
+# SYNOPSIS
+
+  hdtcat-file-list file-list.txt output.hdt
+
+# DESCRIPTION
+
+Takes a file containing paths to HDT files (one per line) and merges them
+into a single output HDT file using hdtCat.sh.
+
+# ENVIRONMENT
+
+  * RDF2HDTCAT_JAVA_OPTS:
+
+    Passed to java(1).
+
+    Default: '$RDF2HDTCAT_JAVA_OPTS_DEFAULT'
+
+  * RDF2HDTCAT_HDTCAT_OPTS:
+
+    Passed to hdtCat.sh.
+
+    Default: '$RDF2HDTCAT_HDTCAT_OPTS_DEFAULT'
+
+EOF
+	exit 1
+fi
+
+PART_LIST="$1"
+RDF_HDT_FINAL="$2"
+
+export RDF2HDTCAT_JAVA_OPTS=${RDF2HDTCAT_JAVA_OPTS:-$RDF2HDTCAT_JAVA_OPTS_DEFAULT}
+export RDF2HDTCAT_HDTCAT_OPTS=${RDF2HDTCAT_HDTCAT_OPTS:-$RDF2HDTCAT_HDTCAT_OPTS_DEFAULT}
+
+if [ -s $PART_LIST ]; then
+	if [ "$(wc -l < $PART_LIST)" -gt 1 ]; then
+		## Merge the partitioned .hdt files together.
+		##
+		## NOTE: Using cat below does not take into account limits of argument count / length.
+		##
+		## `JAVA_OPTIONS` is used inside of `hdtCat.sh` to set the options to java(1).
+		JAVA_OPTIONS=$RDF2HDTCAT_JAVA_OPTS \
+			hdtCat.sh $RDF2HDTCAT_HDTCAT_OPTS $(cat $PART_LIST) $RDF_HDT_FINAL
+	else
+		## Single file
+		mv -v $(cat $PART_LIST) $RDF_HDT_FINAL
+	fi
+else
+	echo "$0: Empty file list: $PART_LIST" >&2
+	exit 1
+fi
