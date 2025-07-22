@@ -45,9 +45,20 @@ When using Nix, you can import the flake directly from the vendored path:
     biobricks-script-lib.url = "path:./vendor/biobricks-script-lib";
   };
 
-  outputs = { self, nixpkgs, biobricks-script-lib, ... }: {
-    # Your flake can now use biobricks-script-lib.packages.${system}.buildInputs
-  };
+  outputs = { self, nixpkgs, flake-utils, biobricks-script-lib }:
+    flake-utils.lib.eachDefaultSystem (system:
+      with import nixpkgs { inherit system; }; {
+        devShells.default = mkShell {
+          buildInputs = [
+            # Project-specific dependencies
+          ] ++ biobricks-script-lib.packages.${system}.buildInputs;
+
+          shellHook = ''
+            # Activate biobricks-script-lib environment
+            eval $(${biobricks-script-lib.packages.${system}.activateScript})
+          '';
+        };
+      });
 }
 ```
 
