@@ -38,7 +38,12 @@ When using Nix, you can import the flake directly from the vendored path:
 
 ```nix
 {
-  inputs.biobricks-script-lib.url = "path:./vendor/biobricks-script-lib";
+  inputs = {
+    # Required for Nix 2.27.0+ when using git submodules
+    self.submodules = true;
+
+    biobricks-script-lib.url = "path:./vendor/biobricks-script-lib";
+  };
 
   outputs = { self, nixpkgs, biobricks-script-lib, ... }: {
     # Your flake can now use biobricks-script-lib.packages.${system}.buildInputs
@@ -47,3 +52,6 @@ When using Nix, you can import the flake directly from the vendored path:
 ```
 
 This provides all required dependencies (HDT tools, Python, Perl, Java runtime, etc.) without manual installation.
+
+Note: The `self.submodules = true` declaration requires Nix 2.27.0 or later.
+See the [Nix 2.27.0 release notes](https://discourse.nixos.org/t/nix-2-27-0-released/62003) for details.
