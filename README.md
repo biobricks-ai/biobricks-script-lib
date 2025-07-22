@@ -31,3 +31,19 @@ or with an already cloned repo:
 ```shell
 git submodule update --init --recursive
 ```
+
+## Nix Flake Usage
+
+When using Nix, you can import the flake directly from the vendored path:
+
+```nix
+{
+  inputs.biobricks-script-lib.url = "path:./vendor/biobricks-script-lib";
+
+  outputs = { self, nixpkgs, biobricks-script-lib, ... }: {
+    # Your flake can now use biobricks-script-lib.packages.${system}.buildInputs
+  };
+}
+```
+
+This provides all required dependencies (HDT tools, Python, Perl, Java runtime, etc.) without manual installation.
