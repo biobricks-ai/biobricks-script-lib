@@ -26,6 +26,9 @@
       let
         pkgs = import nixpkgs { inherit system; };
 
+        # Path to activate script
+        activateScript = "${self}/activate.sh";
+
         # Python environment with biobricks package
         pythonEnv = pkgs.python3.withPackages (ps: with ps; [
           # Core biobricks Python dependencies
@@ -97,12 +100,16 @@
         # Make the build inputs available for other flakes to import
         packages.buildInputs = commonBuildInputs;
 
+        # Make activate script available for other flakes
+        packages.activateScript = activateScript;
+
         # Overlay for other flakes to use
         overlays.default = final: prev: {
           biobricks-script-lib = {
             buildInputs = commonBuildInputs;
             pythonEnv = pythonEnv;
             perlEnv = perlEnv;
+            activateScript = activateScript;
           };
         };
       }
