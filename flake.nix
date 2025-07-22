@@ -78,10 +78,6 @@
               eval $(./activate.sh)
             fi
 
-            # Set up environment variables
-            export LC_ALL=C
-            export TMPDIR=''${TMPDIR:-/tmp}
-
             echo "BioBricks Script Library environment loaded"
           '';
         };
