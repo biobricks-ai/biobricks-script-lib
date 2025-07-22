@@ -1,12 +1,21 @@
-#!/bin/sh
+#!/bin/bash
 
 set -eu
 
 CURSCRIPT=`realpath "$0"`
 CURDIR=`dirname "$CURSCRIPT"`
 
+add_path() {
+	printf 'PATH=%q:$PATH\n' "$1"
+}
+
+add_path "$CURDIR/bin"
+add_path "$CURDIR/vendor/parallel/src"
+
 cat <<EOF
-PATH=$CURDIR/bin:\$PATH
-PATH=$CURDIR/vendor/parallel/src:\$PATH
 export PATH
+LC_ALL=C
+export LC_ALL
+TMPDIR=\${TMPDIR:-/tmp}
+export TMPDIR
 EOF
