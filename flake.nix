@@ -14,9 +14,14 @@
       inputs.flake-utils.follows = "flake-utils";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    nix-qendpoint = {
+      url = "github:insilica/nix-qendpoint";
+      inputs.flake-utils.follows = "flake-utils";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, hdt-cpp, hdt-java }:
+  outputs = { self, nixpkgs, flake-utils, hdt-cpp, hdt-java, nix-qendpoint }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
@@ -54,6 +59,7 @@
           # HDT tools
           hdt-cpp.packages.${system}.default
           hdt-java.packages.${system}.default
+          nix-qendpoint.packages.${system}.default
 
           # Build tools
           pkgs.gnumake
