@@ -64,6 +64,29 @@
         "type": "github"
       }
     },
+    "nix-qendpoint": {
+      "inputs": {
+        "flake-utils": [
+          "flake-utils"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1752689173,
+        "narHash": "sha256-nCm0RTaUYl0jcFHMJl2x3iLjHQHl8KHiTulZyisBDak=",
+        "owner": "insilica",
+        "repo": "nix-qendpoint",
+        "rev": "318f76b89d680480f1c873aaa117109b04a3a7b8",
+        "type": "github"
+      },
+      "original": {
+        "owner": "insilica",
+        "repo": "nix-qendpoint",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1704290814,
@@ -85,6 +108,7 @@
         "flake-utils": "flake-utils",
         "hdt-cpp": "hdt-cpp",
         "hdt-java": "hdt-java",
+        "nix-qendpoint": "nix-qendpoint",
         "nixpkgs": "nixpkgs"
       }
     },
