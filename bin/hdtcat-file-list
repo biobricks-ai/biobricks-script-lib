@@ -1,14 +1,36 @@
-#!/bin/bash
+#!/usr/bin/env perl
 
-set -euo pipefail;
+use strict;
+use warnings;
+use feature qw(state);
+use File::Temp qw(tempdir);
+use IPC::Open2;
+use Term::ANSIColor qw(colored);
+use List::Util qw(min max);
 
-export LC_ALL=C
+sub info {
+	my $msg = shift;
+	print STDERR colored("INFO: ", 'blue') . "$msg\n";
+}
 
-RDF2HDTCAT_JAVA_OPTS_DEFAULT='-Xmx6g'
-RDF2HDTCAT_HDTCAT_OPTS_DEFAULT=''
+sub debug {
+	my $msg = shift;
+	return unless $ENV{HDTCAT_DEBUG};
+	print STDERR colored("DEBUG: ", 'yellow') . "$msg\n";
+}
 
-if [ "$#" -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
-	cat <<EOF >&2
+sub get_num_cores {
+	state $num_cores = do {
+		my $cores = `parallel --number-of-cores 2>/dev/null` || 1;
+		chomp $cores;
+		$cores = 1 unless $cores =~ /^\d+$/ && $cores > 0;
+		$cores;
+	};
+	return $num_cores;
+}
+
+if (@ARGV != 2 || !$ARGV[0] || !$ARGV[1]) {
+	print STDERR <<'EOF';
 # NAME
 
   hdtcat-file-list - merge HDT files from a list file
@@ -20,46 +42,181 @@ if [ "$#" -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
 # DESCRIPTION
 
 Takes a file containing paths to HDT files (one per line) and merges them
-into a single output HDT file using hdtCat.sh.
+into a single output HDT file using hdtCat (via hdtcat-wrapper).
+
+WARNING: This tool removes the input HDT files after successful merging.
+Ensure you have backups if you need to preserve the original files.
 
 # ENVIRONMENT
 
-  * RDF2HDTCAT_JAVA_OPTS:
+  * HDTCAT_MERGE_BATCH_SIZE:
+
+    Number of files to merge in each batch. Use -1 for unlimited (merge all at once).
+
+    Default: Dynamic sizing optimized for fewer rounds - smaller batches for
+    many small files, larger batches for fewer large files.
+
+  * HDTCAT_JAVA_OPTS:
 
     Passed to java(1).
 
-    Default: '$RDF2HDTCAT_JAVA_OPTS_DEFAULT'
+    Default: '-Xmx6g'
 
-  * RDF2HDTCAT_HDTCAT_OPTS:
+  * HDTCAT_HDTCAT_OPTS:
 
-    Passed to hdtCat.sh.
+    Passed to hdtCat.
 
-    Default: '$RDF2HDTCAT_HDTCAT_OPTS_DEFAULT'
+  * HDTCAT_COMMAND:
+
+    Override the hdtCat command (default: auto-detect qendpoint-hdtCat.sh or hdtCat.sh).
+
+    Default: ''
+
+  * HDTCAT_DEBUG:
+
+    Enable debug output showing intermediate files and hdtCat output.
+
+  * HDTCAT_PARALLEL_OPTS:
+
+    Additional options passed to parallel(1) for batch processing.
+
+    Default: ''
 
 EOF
-	exit 1
-fi
+	exit 1;
+}
 
-PART_LIST="$1"
-RDF_HDT_FINAL="$2"
+my ($part_list, $final_output) = @ARGV;
 
-export RDF2HDTCAT_JAVA_OPTS=${RDF2HDTCAT_JAVA_OPTS:-$RDF2HDTCAT_JAVA_OPTS_DEFAULT}
-export RDF2HDTCAT_HDTCAT_OPTS=${RDF2HDTCAT_HDTCAT_OPTS:-$RDF2HDTCAT_HDTCAT_OPTS_DEFAULT}
+my $java_opts = $ENV{HDTCAT_JAVA_OPTS} // '-Xmx6g';
+my $hdtcat_opts = $ENV{HDTCAT_HDTCAT_OPTS} // '';
+my $parallel_opts = $ENV{HDTCAT_PARALLEL_OPTS} // '';
 
-if [ -s $PART_LIST ]; then
-	if [ "$(wc -l < $PART_LIST)" -gt 1 ]; then
-		## Merge the partitioned .hdt files together.
-		##
-		## NOTE: Using cat below does not take into account limits of argument count / length.
-		##
-		## `JAVA_OPTIONS` is used inside of `hdtCat.sh` to set the options to java(1).
-		JAVA_OPTIONS=$RDF2HDTCAT_JAVA_OPTS \
-			hdtCat.sh $RDF2HDTCAT_HDTCAT_OPTS $(cat $PART_LIST) $RDF_HDT_FINAL
-	else
-		## Single file
-		mv -v $(cat $PART_LIST) $RDF_HDT_FINAL
-	fi
-else
-	echo "$0: Empty file list: $PART_LIST" >&2
-	exit 1
-fi
+# Read input files
+open my $fh, '<', $part_list or die "Cannot open $part_list: $!";
+chomp(my @current_files = <$fh>);
+close $fh;
+
+die "Empty file list: $part_list\n" unless @current_files;
+
+my $configured_batch_size = $ENV{HDTCAT_MERGE_BATCH_SIZE};
+
+# Single file case - just move it
+if (@current_files == 1) {
+	system('mv', '-v', $current_files[0], $final_output) == 0
+		or die "Failed to move file: $!";
+	exit 0;
+}
+
+# Unlimited batch size - merge all at once
+if (defined $configured_batch_size && $configured_batch_size == -1) {
+	info("Merging all " . scalar(@current_files) . " files in one pass");
+	$ENV{JAVA_OPTIONS} = $java_opts;
+	system('hdtcat-wrapper', split(' ', $hdtcat_opts), @current_files, $final_output) == 0
+		or die "hdtcat-wrapper failed: $!";
+
+	# Clean up input files after successful merge
+	for my $file (@current_files) {
+		unlink $file or warn "Could not remove $file: $!";
+	}
+
+	exit 0;
+}
+
+# Hierarchical merge
+my $temp_dir = tempdir(SUFFIX => '.hdtcat-merge', CLEANUP => 1);
+my $round = 0;
+
+info("Starting hierarchical merge of " . scalar(@current_files) . " files");
+debug("Temporary directory: $temp_dir");
+
+while (@current_files > 1) {
+	$round++;
+
+	# Calculate batch size for this round
+	my $batch_size;
+	if (defined $configured_batch_size) {
+		$batch_size = $configured_batch_size;
+	} else {
+		# Inverse batch sizing - smaller batches in early rounds
+		# This helps manage memory as files get larger in later rounds
+		my $num_cores = get_num_cores();
+
+		# Calculate ideal batch size to utilize cores
+		my $ideal_batch = int(@current_files / $num_cores);
+		my $min_batch_later = $num_cores;  # Larger batches in later rounds
+
+		if (@current_files > 128) {
+			# Many small files - cap at 32 files per batch
+			$batch_size = min(32, max(8, $ideal_batch));
+		} elsif (@current_files > 64) {
+			# Medium files - moderate cap
+			$batch_size = min(16, max(4, $ideal_batch));
+		} else {
+			# Fewer files - use larger batch sizes for bigger merges
+			$batch_size = max($min_batch_later, $ideal_batch);
+		}
+	}
+
+	info("Round $round: merging " . scalar(@current_files) . " files with batch size $batch_size");
+
+	local $ENV{MERGE_TEMP_DIR} = $temp_dir;
+	local $ENV{MERGE_ROUND} = $round;
+	local $ENV{MERGE_JAVA_OPTS} = $java_opts;
+	local $ENV{MERGE_HDTCAT_OPTS} = $hdtcat_opts;
+	local $ENV{MERGE_BATCH_SIZE} = $batch_size;
+	local $ENV{MERGE_PARALLEL_OPTS} = $parallel_opts;
+
+	my ($out, $in);
+	my $pid = open2($out, $in, 'sh', '-c', <<~'EOF');
+		set -eu
+		parallel $MERGE_PARALLEL_OPTS -N$MERGE_BATCH_SIZE --line-buffer --tagstring "R${MERGE_ROUND}J{#}" '
+			set -eu
+			count_args() { echo $#; }
+			ARG_COUNT=$( count_args {} )
+			if [ "$ARG_COUNT" -eq 0 ]; then
+				echo "HDTMERGE_ERROR: No arguments provided to job" >&2
+				exit 1
+			elif [ "$ARG_COUNT" -eq 1 ]; then
+				echo "HDTMERGE_OUTPUT:{}"
+			else
+				OUTPUT=$MERGE_TEMP_DIR/round${MERGE_ROUND}_job{#}.hdt ;
+				JAVA_OPTIONS="$MERGE_JAVA_OPTS" hdtcat-wrapper $MERGE_HDTCAT_OPTS {} $OUTPUT >&2 ;
+				rm -f {} ;
+				echo "HDTMERGE_OUTPUT:$OUTPUT" ;
+			fi
+		'
+	EOF
+
+	# Send files to parallel
+	print $in "$_\n" for @current_files;
+	close $in;
+
+	# Read results
+	my @next_files;
+	while (<$out>) {
+		chomp;
+		my ($tag, $output) = /\t/ ? split(/\t/, $_, 2) : ('hdtcat', $_);
+		if ($output =~ /^HDTMERGE_OUTPUT:(.+)$/) {
+			push @next_files, $1;
+			debug("  [$tag] Created: $1");
+		} else {
+			debug("  [$tag] $output");
+		}
+	}
+	close $out;
+
+	waitpid($pid, 0);
+	die "Parallel merge failed in round $round\n" if $? != 0;
+
+	die "No output files from round $round\n" unless @next_files;
+
+	info("Round $round complete: " . scalar(@next_files) . " files remain");
+	@current_files = @next_files;
+}
+
+info("Moving final result to $final_output");
+system('mv', '-v', $current_files[0], $final_output) == 0
+	or die "Failed to move final file: $!";
+
+info("Merge complete");
