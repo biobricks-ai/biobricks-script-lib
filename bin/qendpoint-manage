@@ -1,0 +1,487 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use Getopt::Long qw(:config no_ignore_case bundling);
+use IO::Socket::INET;
+use File::Spec;
+use File::Basename;
+use Cwd 'realpath';
+use POSIX qw(strftime);
+use Term::ANSIColor qw(colored);
+
+# Default values
+my $DEFAULT_INFO_FILE = "$ENV{HOME}/.qendpoint-instances";
+my $DEFAULT_SPARQL = 'SELECT * WHERE { ?subj ?pred ?obj . } LIMIT 10';
+my $DEFAULT_ACCEPT = 'application/sparql-results+json';
+
+# Format shortcuts
+my %FORMAT_MAP = (
+    json => 'application/sparql-results+json',
+    xml  => 'application/sparql-results+xml',
+    csv  => 'text/csv',
+    tsv  => 'text/tab-separated-values',
+);
+
+# Color mappings
+my %COLORS = (
+    info => 'blue',
+    warn => 'yellow',
+    error => 'red',
+    success => 'green'
+);
+
+# Logging functions
+sub log_msg {
+    my ($level, $msg) = @_;
+    my $color = $COLORS{$level} || 'white';
+    print STDERR colored(uc($level) . ": ", $color) . "$msg\n";
+}
+
+sub log_info { log_msg('info', shift); }
+sub log_warn { log_msg('warn', shift); }
+sub log_error { log_msg('error', shift); }
+sub log_success { log_msg('success', shift); }
+
+sub show_help {
+    print <<'EOF';
+NAME
+    qendpoint-manage - Manage qendpoint instances
+
+SYNOPSIS
+    qendpoint-manage <subcommand> [options] [arguments]
+
+SUBCOMMANDS
+    start HDT_FILE [BASE_DIR] [INFO_FILE]
+        Set up and start a qendpoint instance for an HDT file
+
+    query [OPTIONS] HDT_PATH [SPARQL_QUERY]
+        Execute SPARQL queries against running instances
+        Options:
+            -a, --accept FORMAT   Accept header format (default: application/sparql-results+json)
+            -f, --format FORMAT   Format shortcut: json, xml, csv, tsv
+            -i, --info FILE       Info file path (default: ~/.qendpoint-instances)
+
+    list [INFO_FILE]
+        List all running qendpoint instances
+
+    stop HDT_PATH [INFO_FILE]
+        Stop a qendpoint instance by HDT file path
+
+    cleanup [INFO_FILE]
+        Remove dead processes from info file
+
+EXAMPLES
+    # Start qendpoint for an HDT file
+    qendpoint-manage start /data/dataset.hdt
+
+    # Query with default SPARQL
+    qendpoint-manage query /data/dataset.hdt
+
+    # Query with custom SPARQL and CSV output
+    qendpoint-manage query --accept text/csv /data/dataset.hdt "SELECT * WHERE { ?s ?p ?o } LIMIT 5"
+
+    # Query using format shortcuts
+    qendpoint-manage query --format csv /data/dataset.hdt
+    qendpoint-manage query -f tsv /data/dataset.hdt "SELECT * WHERE { ?s ?p ?o }"
+
+    # List running instances
+    qendpoint-manage list
+
+    # Stop an instance
+    qendpoint-manage stop /data/dataset.hdt
+
+EOF
+}
+
+sub find_free_port {
+    my $sock = IO::Socket::INET->new(
+        LocalPort => 0,
+        Proto => "tcp",
+        Listen => 1,
+        ReuseAddr => 1
+    ) or die "Cannot create socket: $!";
+
+    my $port = $sock->sockport();
+    close($sock);
+    return $port;
+}
+
+sub md5_file {
+    my $file = shift;
+    my $md5;
+
+    if (system("which md5sum >/dev/null 2>&1") == 0) {
+        $md5 = `md5sum "$file"`;
+        $md5 = (split /\s+/, $md5)[0];
+    } elsif (system("which md5 >/dev/null 2>&1") == 0) {
+        $md5 = `md5 -q "$file"`;
+        chomp $md5;
+    } else {
+        die "Error: Neither md5sum nor md5 command found\n";
+    }
+
+    chomp $md5;
+    return $md5;
+}
+
+sub check_command {
+    my $cmd = shift;
+    return system("which $cmd >/dev/null 2>&1") == 0;
+}
+
+sub is_process_running {
+    my $pid = shift;
+    return kill(0, $pid);
+}
+
+sub start_qendpoint {
+    my ($hdt_file, $base_dir, $info_file) = @_;
+
+    $base_dir //= '.';
+    $info_file //= $DEFAULT_INFO_FILE;
+
+    # Validate HDT file exists
+    die "Error: HDT file not found: $hdt_file\n" unless -f $hdt_file;
+
+    # Get absolute paths
+    my $hdt_file_abs = realpath($hdt_file);
+    my $base_dir_abs = realpath($base_dir);
+
+    # Calculate MD5 hash
+    my $md5_hash = md5_file($hdt_file_abs);
+
+    # Clean up the path for directory name
+    my $cleaned_path = basename($hdt_file);
+    $cleaned_path =~ s/[^a-zA-Z0-9._-]/_/g;
+
+    # Create directory structure
+    my $dir_name = "qendpoint_${cleaned_path}_md5-${md5_hash}";
+    my $full_dir_path = File::Spec->catdir($base_dir_abs, $dir_name);
+    my $qendpoint_dir = File::Spec->catdir($full_dir_path, 'qendpoint');
+    my $hdt_store_dir = File::Spec->catdir($qendpoint_dir, 'hdt-store');
+
+    # Create directories
+    system("mkdir -p '$hdt_store_dir'") == 0 or die "Failed to create directories\n";
+
+    # Create symlink
+    my $symlink_path = File::Spec->catfile($hdt_store_dir, 'index_dev.hdt');
+    unlink $symlink_path if -l $symlink_path;
+    die "Error: $symlink_path exists and is not a symlink\n" if -e $symlink_path;
+
+    symlink($hdt_file_abs, $symlink_path) or die "Failed to create symlink: $!\n";
+
+    # Find free port
+    my $port = find_free_port();
+
+    # Check required commands
+    die "Error: qendpoint.sh not found in PATH\n" unless check_command('qendpoint.sh');
+    die "Error: qepSearch.sh not found in PATH\n" unless check_command('qepSearch.sh');
+
+    # Run indexing
+    log_info("Running HDT indexing with qepSearch.sh...");
+    system("qepSearch.sh '$symlink_path' < /dev/null") == 0
+        or die "Error: Failed to index HDT file\n";
+    log_success("Indexing complete.");
+
+    # Create repo_model.ttl with port configuration
+    my $repo_model_path = File::Spec->catfile($qendpoint_dir, 'repo_model.ttl');
+    open my $fh, '>', $repo_model_path or die "Cannot write repo_model.ttl: $!\n";
+    print $fh "\@prefix mdlc: <http://the-qa-company.com/modelcompiler/> .\n\n";
+    print $fh "# Describe the endpoint server port\n";
+    print $fh "mdlc:main mdlc:serverPort $port .\n";
+    close $fh;
+
+    # Set Java options
+    $ENV{JAVA_OPTIONS} = "-Dspring.autoconfigure.exclude=org.springframework.boot.autoconfigure.http.client.HttpClientAutoConfiguration -Dspring.devtools.restart.enabled=false";
+
+    # Log files
+    my $log_file = File::Spec->catfile($full_dir_path, 'qendpoint.log');
+    my $err_file = File::Spec->catfile($full_dir_path, 'qendpoint.err');
+    my $pid_file = File::Spec->catfile($full_dir_path, 'qendpoint.pid');
+
+    # Start qendpoint as daemon
+    log_info("Starting qendpoint on port $port...");
+    log_info("HDT file: $hdt_file_abs");
+    log_info("Directory: $full_dir_path");
+    log_info("Logs: $log_file");
+
+    # Fork and start qendpoint
+    my $pid = fork();
+    if (!defined $pid) {
+        die "Failed to fork: $!\n";
+    } elsif ($pid == 0) {
+        # Child process
+        chdir $full_dir_path or die "Cannot chdir to $full_dir_path: $!\n";
+        open STDOUT, '>', $log_file or die "Cannot redirect stdout: $!\n";
+        open STDERR, '>', $err_file or die "Cannot redirect stderr: $!\n";
+        exec 'qendpoint.sh' or die "Cannot exec qendpoint.sh: $!\n";
+    }
+
+    # Parent process - save PID
+    open my $pid_fh, '>', $pid_file or die "Cannot write PID file: $!\n";
+    print $pid_fh $pid;
+    close $pid_fh;
+
+    # Wait a moment to check if process started successfully
+    sleep 2;
+    unless (is_process_running($pid)) {
+        die "Error: Failed to start qendpoint process\nCheck error log: $err_file\n";
+    }
+
+    # Get timestamp
+    my $timestamp = strftime("%Y-%m-%dT%H:%M:%SZ", gmtime());
+
+    # Write to info file (tab-separated)
+    open my $info_fh, '>>', $info_file or die "Cannot write to info file: $!\n";
+    print $info_fh join("\t", $full_dir_path, $port, $pid, $timestamp, $hdt_file_abs) . "\n";
+    close $info_fh;
+
+    log_success("Qendpoint started successfully!");
+    log_info("  Port: $port");
+    log_info("  PID: $pid");
+    log_info("  Directory: $full_dir_path");
+    log_info("  Info saved to: $info_file");
+}
+
+sub query_qendpoint {
+    my ($hdt_path, $sparql_query, $accept_format, $info_file) = @_;
+
+    $sparql_query //= $DEFAULT_SPARQL;
+    $accept_format //= $DEFAULT_ACCEPT;
+    $info_file //= $DEFAULT_INFO_FILE;
+
+    # Check if info file exists
+    die "Error: Info file not found: $info_file\nNo qendpoint instances appear to be running.\n"
+        unless -f $info_file;
+
+    # Interactive mode if no HDT path provided
+    unless ($hdt_path) {
+        print "Available qendpoint instances:\n";
+        print "PATH\tPORT\tPID\tTIMESTAMP\tHDT_FILE\n";
+        open my $fh, '<', $info_file or die "Cannot read info file: $!\n";
+        while (<$fh>) {
+            print;
+        }
+        close $fh;
+        print "\nUsage: qendpoint-manage query <HDT_PATH> [SPARQL_QUERY]\n";
+        return;
+    }
+
+    # Find the port for the given HDT file
+    my $hdt_path_abs = eval { realpath($hdt_path) } || $hdt_path;
+    my $port;
+
+    open my $fh, '<', $info_file or die "Cannot read info file: $!\n";
+    while (my $line = <$fh>) {
+        chomp $line;
+        my ($path, $p, $pid, $timestamp, $hdt_file) = split /\t/, $line;
+
+        if ($hdt_file eq $hdt_path_abs || $hdt_file eq $hdt_path) {
+            if (is_process_running($pid)) {
+                $port = $p;
+                last;
+            } else {
+                log_warn("Process $pid for $hdt_file is no longer running");
+            }
+        }
+    }
+    close $fh;
+
+    unless ($port) {
+        log_error("No running qendpoint instance found for HDT file: $hdt_path");
+        log_info("Available instances:");
+        log_info("HDT_FILE\tPORT\tPID");
+
+        open my $fh, '<', $info_file or die "Cannot read info file: $!\n";
+        while (my $line = <$fh>) {
+            chomp $line;
+            my ($path, $p, $pid, $timestamp, $hdt_file) = split /\t/, $line;
+            log_info("$hdt_file\t$p\t$pid") if is_process_running($pid);
+        }
+        close $fh;
+        exit 1;
+    }
+
+    # Execute SPARQL query
+    log_info("Querying qendpoint on port $port...");
+    log_info("HDT file: $hdt_path_abs");
+    log_info("Query: $sparql_query");
+
+    exec 'curl', '-X', 'POST', "http://localhost:$port/api/endpoint/sparql",
+         '-H', "Accept: $accept_format",
+         '-H', 'Content-Type: application/sparql-query',
+         '-d', $sparql_query;
+}
+
+sub list_instances {
+    my $info_file = shift // $DEFAULT_INFO_FILE;
+
+    unless (-f $info_file) {
+        log_warn("No qendpoint instances found (info file does not exist: $info_file)");
+        return;
+    }
+
+    log_info("Running qendpoint instances:");
+    print "HDT_FILE\tPORT\tPID\tDIRECTORY\tTIMESTAMP\n";
+
+    open my $fh, '<', $info_file or die "Cannot read info file: $!\n";
+    my $count = 0;
+    while (my $line = <$fh>) {
+        chomp $line;
+        my ($path, $port, $pid, $timestamp, $hdt_file) = split /\t/, $line;
+
+        if (is_process_running($pid)) {
+            print "$hdt_file\t$port\t$pid\t$path\t$timestamp\n";
+            $count++;
+        }
+    }
+    close $fh;
+
+    log_info("Total: $count running instances") if $count > 0;
+    log_warn("No running instances found") if $count == 0;
+}
+
+sub stop_instance {
+    my ($hdt_path, $info_file) = @_;
+
+    $info_file //= $DEFAULT_INFO_FILE;
+
+    die "Error: Info file not found: $info_file\n" unless -f $info_file;
+
+    my $hdt_path_abs = eval { realpath($hdt_path) } || $hdt_path;
+    my $found = 0;
+
+    open my $fh, '<', $info_file or die "Cannot read info file: $!\n";
+    while (my $line = <$fh>) {
+        chomp $line;
+        my ($path, $port, $pid, $timestamp, $hdt_file) = split /\t/, $line;
+
+        if ($hdt_file eq $hdt_path_abs || $hdt_file eq $hdt_path) {
+            $found = 1;
+            if (is_process_running($pid)) {
+                log_info("Stopping qendpoint instance (PID: $pid, Port: $port)");
+                kill 'TERM', $pid;
+
+                # Wait for graceful shutdown
+                my $attempts = 0;
+                while (is_process_running($pid) && $attempts < 10) {
+                    sleep 1;
+                    $attempts++;
+                }
+
+                # Force kill if necessary
+                if (is_process_running($pid)) {
+                    log_warn("Force killing process $pid");
+                    kill 'KILL', $pid;
+                }
+
+                log_success("Instance stopped");
+            } else {
+                log_warn("Process $pid was already dead");
+            }
+            last;
+        }
+    }
+    close $fh;
+
+    unless ($found) {
+        die "Error: No qendpoint instance found for HDT file: $hdt_path\n";
+    }
+}
+
+sub cleanup_instances {
+    my $info_file = shift // $DEFAULT_INFO_FILE;
+
+    return unless -f $info_file;
+
+    log_info("Cleaning up dead processes from $info_file...");
+
+    # Read all lines
+    open my $fh, '<', $info_file or die "Cannot read info file: $!\n";
+    my @lines = <$fh>;
+    close $fh;
+
+    # Filter out dead processes
+    my @live_lines;
+    my $removed = 0;
+
+    for my $line (@lines) {
+        chomp $line;
+        my ($path, $port, $pid, $timestamp, $hdt_file) = split /\t/, $line;
+
+        if (is_process_running($pid)) {
+            push @live_lines, $line;
+        } else {
+            log_info("Removing dead process: PID $pid, HDT $hdt_file");
+            $removed++;
+        }
+    }
+
+    # Write back the cleaned file
+    open my $out_fh, '>', $info_file or die "Cannot write info file: $!\n";
+    for my $line (@live_lines) {
+        print $out_fh "$line\n";
+    }
+    close $out_fh;
+
+    log_success("Removed $removed dead processes");
+}
+
+# Main script
+my $subcommand = shift @ARGV or do {
+    show_help();
+    exit 1;
+};
+
+if ($subcommand eq 'help' || $subcommand eq '--help' || $subcommand eq '-h') {
+    show_help();
+    exit 0;
+}
+
+if ($subcommand eq 'start') {
+    my ($hdt_file, $base_dir, $info_file) = @ARGV;
+    die "Usage: qendpoint-manage start HDT_FILE [BASE_DIR] [INFO_FILE]\n" unless $hdt_file;
+    start_qendpoint($hdt_file, $base_dir, $info_file);
+
+} elsif ($subcommand eq 'query') {
+    my ($accept_format, $format_shortcut, $info_file, $hdt_path, $sparql_query);
+
+    # Parse options
+    GetOptions(
+        'accept|a=s' => \$accept_format,
+        'format|f=s' => \$format_shortcut,
+        'info|i=s' => \$info_file,
+        'help|h' => sub { show_help(); exit 0; }
+    ) or die "Error parsing options\n";
+
+    # Handle format shortcut
+    if ($format_shortcut) {
+        if (exists $FORMAT_MAP{lc($format_shortcut)}) {
+            $accept_format = $FORMAT_MAP{lc($format_shortcut)};
+        } else {
+            log_error("Unknown format shortcut: $format_shortcut");
+            log_info("Valid shortcuts: " . join(', ', sort keys %FORMAT_MAP));
+            exit 1;
+        }
+    }
+
+    ($hdt_path, $sparql_query) = @ARGV;
+    query_qendpoint($hdt_path, $sparql_query, $accept_format, $info_file);
+
+} elsif ($subcommand eq 'list') {
+    my $info_file = shift @ARGV;
+    list_instances($info_file);
+
+} elsif ($subcommand eq 'stop') {
+    my ($hdt_path, $info_file) = @ARGV;
+    die "Usage: qendpoint-manage stop HDT_PATH [INFO_FILE]\n" unless $hdt_path;
+    stop_instance($hdt_path, $info_file);
+
+} elsif ($subcommand eq 'cleanup') {
+    my $info_file = shift @ARGV;
+    cleanup_instances($info_file);
+
+} else {
+    die "Unknown subcommand: $subcommand\nRun 'qendpoint-manage help' for usage information.\n";
+}
