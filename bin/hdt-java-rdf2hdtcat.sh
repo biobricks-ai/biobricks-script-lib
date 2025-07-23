@@ -7,7 +7,7 @@ function showhelp {
 	echo
 	echo "Usage $0 [OPTION]"
 	echo
-    echo "  -c, --catscript location of hdtCat script  (assuming it's in PATH by by default)"
+    echo "  -c, --catscript location of hdtCat script  (using hdtcat-wrapper by default)"
     echo "  -i, --input     input file (input.rdf by default)"
 	echo "  -h, --help      shows this help and exits"
 	echo "  -n, --number    number of files to split FILE (2 by default)"
@@ -19,7 +19,7 @@ function showhelp {
 
 # Defaults
 declare rdf2hdt="rdf2hdt.sh"
-declare hdtCat="hdtCat.sh"
+declare hdtCat="hdtcat-wrapper"
 declare input="input.rdf"
 declare -i lines
 declare output="output.hdt"

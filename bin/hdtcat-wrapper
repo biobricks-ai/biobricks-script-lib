@@ -1,0 +1,30 @@
+#!/bin/bash
+# Wrapper script for hdtCat that chooses between hdtCat.sh and qendpoint-hdtCat.sh
+# Allows overriding via HDTCAT_COMMAND environment variable
+
+set -euo pipefail
+
+# Check if user has specified a command via environment variable
+if [ -n "${HDTCAT_COMMAND:-}" ]; then
+    HDTCAT="$HDTCAT_COMMAND"
+else
+    # Try to find qendpoint-hdtCat.sh first (preferred)
+    if command -v qendpoint-hdtCat.sh >/dev/null 2>&1; then
+        HDTCAT="qendpoint-hdtCat.sh"
+    elif command -v hdtCat.sh >/dev/null 2>&1; then
+        HDTCAT="hdtCat.sh"
+    else
+        echo "Error: Neither qendpoint-hdtCat.sh nor hdtCat.sh found in PATH" >&2
+        echo "Please ensure one of these tools is installed or set HDTCAT_COMMAND" >&2
+        exit 1
+    fi
+fi
+
+# Verify the selected command exists
+if ! command -v "$HDTCAT" >/dev/null 2>&1; then
+    echo "Error: Specified HDTCAT_COMMAND '$HDTCAT' not found in PATH" >&2
+    exit 1
+fi
+
+# Execute the hdtCat command with all arguments
+exec "$HDTCAT" "$@"
