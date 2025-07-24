@@ -167,6 +167,8 @@ while (@current_files > 1) {
 	local $ENV{MERGE_BATCH_SIZE} = $batch_size;
 	local $ENV{MERGE_PARALLEL_OPTS} = $parallel_opts;
 
+	local $ENV{MERGE_REMOVE_INPUTS} = 0;
+
 	my ($out, $in);
 	my $pid = open2($out, $in, 'sh', '-c', <<~'EOF');
 		set -eu
@@ -182,7 +184,9 @@ while (@current_files > 1) {
 			else
 				OUTPUT=$MERGE_TEMP_DIR/round${MERGE_ROUND}_job{#}.hdt ;
 				JAVA_OPTIONS="$MERGE_JAVA_OPTS" hdtcat-wrapper $MERGE_HDTCAT_OPTS {} $OUTPUT >&2 ;
-				rm -f {} ;
+				if [ "${MERGE_REMOVE_INPUTS:-1}" -ne 0 ]; then
+					rm -f {} ;
+				fi
 				echo "HDTMERGE_OUTPUT:$OUTPUT" ;
 			fi
 		'
