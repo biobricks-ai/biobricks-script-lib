@@ -22,9 +22,28 @@
 	};
 
 	outputs = { self, nixpkgs, flake-utils, hdt-cpp, hdt-java, nix-qendpoint }:
+		{
+			overlays.default = final: prev: {
+				perlPackages = prev.perlPackages // {
+					LogAnyAdapterScreen = final.callPackage ./maint/nixpkg/perl/log-any-adapter-screen.nix {};
+					TextTableTiny = final.callPackage ./maint/nixpkg/perl/text-table-tiny.nix {};
+					StringTtyLength = final.callPackage ./maint/nixpkg/perl/string-ttylength.nix {};
+					UnicodeEastAsianWidth = final.callPackage ./maint/nixpkg/perl/unicode-eastasianwidth.nix {};
+					SyntaxConstruct = final.callPackage ./maint/nixpkg/perl/syntax-construct.nix {};
+					DockerNamesRandom = final.callPackage ./maint/nixpkg/perl/docker-names-random.nix {};
+					GetoptLong = final.callPackage ./maint/nixpkg/perl/getopt-long.nix {};
+					GetoptLongDescriptive = final.callPackage ./maint/nixpkg/perl/getopt-long-descriptive.nix {};
+					FileSymlinkRelative = final.callPackage ./maint/nixpkg/perl/file-symlink-relative.nix {};
+					Test2ToolsLoadModule = final.callPackage ./maint/nixpkg/perl/test2-tools-loadmodule.nix {};
+				};
+			};
+		} //
 		flake-utils.lib.eachDefaultSystem (system:
 			let
-				pkgs = import nixpkgs { inherit system; };
+				pkgs = import nixpkgs {
+					inherit system;
+					overlays = [ self.overlays.default ];
+				};
 
 				# Path to activate script
 				activateScript = "${self}/activate.sh";
@@ -36,11 +55,44 @@
 					# For now, this provides the Python runtime environment
 				]);
 
-				# Perl environment with standard modules
-				perlEnv = pkgs.perl.withPackages (ps: with ps; [
-					# All required Perl modules are part of the standard library
-					# or come with the base perl installation
-				]);
+				# qendpoint-manage dependencies record
+				qendpointManage = {
+					# Perl module dependencies
+					perlModules = ps: with ps; [
+						ClassTiny
+						PathTiny
+						JSONMaybeXS
+						FileWhich
+						CaptureTiny
+						IPCRun
+						ShellConfigGenerate
+						pkgs.perlPackages.GetoptLong
+						pkgs.perlPackages.GetoptLongDescriptive
+						PodUsage
+						LogAny
+						ProcProcessTable
+						pkgs.perlPackages.SyntaxConstruct
+						pkgs.perlPackages.TextTableTiny
+						pkgs.perlPackages.StringTtyLength
+						pkgs.perlPackages.UnicodeEastAsianWidth
+						pkgs.perlPackages.LogAnyAdapterScreen
+						pkgs.perlPackages.DockerNamesRandom
+						ListUtilsBy
+						TestTCP
+						pkgs.perlPackages.FileSymlinkRelative
+						# All other required Perl modules are part of the standard library
+						# or come with the base perl installation
+					];
+
+					# Native binary dependencies
+					nativeDeps = [
+						pkgs.curl  # Used for SPARQL HTTP requests
+						nix-qendpoint.packages.${system}.default  # qendpoint.sh and qepSearch.sh
+					];
+				};
+
+				# Perl environment with qendpoint-manage modules
+				perlEnv = pkgs.perl.withPackages qendpointManage.perlModules;
 
 				# Common development environment for biobricks-script-lib
 				commonBuildInputs = [
@@ -62,7 +114,9 @@
 					# HDT tools
 					hdt-cpp.packages.${system}.default
 					hdt-java.packages.${system}.default
-					nix-qendpoint.packages.${system}.default
+
+					# qendpoint-manage native dependencies
+				] ++ qendpointManage.nativeDeps ++ [
 
 					# Build tools
 					pkgs.gnumake
@@ -102,16 +156,6 @@
 
 				# Make activate script available for other flakes
 				packages.activateScript = activateScript;
-
-				# Overlay for other flakes to use
-				overlays.default = final: prev: {
-					biobricks-script-lib = {
-						buildInputs = commonBuildInputs;
-						pythonEnv = pythonEnv;
-						perlEnv = perlEnv;
-						activateScript = activateScript;
-					};
-				};
 			}
 		);
 }
