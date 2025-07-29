@@ -38,27 +38,27 @@ When using Nix, you can import the flake directly from the vendored path:
 
 ```nix
 {
-  inputs = {
-    # Required for Nix 2.27.0+ when using git submodules
-    self.submodules = true;
+	inputs = {
+		# Required for Nix 2.27.0+ when using git submodules
+		self.submodules = true;
 
-    biobricks-script-lib.url = "path:./vendor/biobricks-script-lib";
-  };
+		biobricks-script-lib.url = "path:./vendor/biobricks-script-lib";
+	};
 
-  outputs = { self, nixpkgs, flake-utils, biobricks-script-lib }:
-    flake-utils.lib.eachDefaultSystem (system:
-      with import nixpkgs { inherit system; }; {
-        devShells.default = mkShell {
-          buildInputs = [
-            # Project-specific dependencies
-          ] ++ biobricks-script-lib.packages.${system}.buildInputs;
+	outputs = { self, nixpkgs, flake-utils, biobricks-script-lib }:
+		flake-utils.lib.eachDefaultSystem (system:
+			with import nixpkgs { inherit system; }; {
+				devShells.default = mkShell {
+					buildInputs = [
+						# Project-specific dependencies
+					] ++ biobricks-script-lib.packages.${system}.buildInputs;
 
-          shellHook = ''
-            # Activate biobricks-script-lib environment
-            eval $(${biobricks-script-lib.packages.${system}.activateScript})
-          '';
-        };
-      });
+					shellHook = ''
+						# Activate biobricks-script-lib environment
+						eval $(${biobricks-script-lib.packages.${system}.activateScript})
+					'';
+				};
+			});
 }
 ```
 
