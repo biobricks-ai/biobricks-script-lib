@@ -14,7 +14,7 @@ add_path "$CURDIR/vendor/parallel/src"
 
 cat <<EOF
 export PATH
-LC_ALL=C
+LC_ALL=C.UTF-8
 export LC_ALL
 TMPDIR=\${TMPDIR:-/tmp}
 export TMPDIR
