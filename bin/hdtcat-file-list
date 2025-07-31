@@ -169,6 +169,7 @@ while (@current_files > 1) {
 
 	local $ENV{MERGE_REMOVE_INPUTS} = 0;
 
+	# TODO Use JAVA_TOOL_OPTIONS instead which handles spaces
 	my ($out, $in);
 	my $pid = open2($out, $in, 'sh', '-c', <<~'EOF');
 		set -eu
