@@ -14,29 +14,16 @@
 			inputs.flake-utils.follows = "flake-utils";
 			inputs.nixpkgs.follows = "nixpkgs";
 		};
-		nix-qendpoint = {
-			url = "github:insilica/nix-qendpoint";
+		qendpoint-manage = {
+			url = "path:./component/qendpoint-manage";
 			inputs.flake-utils.follows = "flake-utils";
 			inputs.nixpkgs.follows = "nixpkgs";
 		};
 	};
 
-	outputs = { self, nixpkgs, flake-utils, hdt-cpp, hdt-java, nix-qendpoint }:
+	outputs = { self, nixpkgs, flake-utils, hdt-cpp, hdt-java, qendpoint-manage }:
 		{
-			overlays.default = final: prev: {
-				perlPackages = prev.perlPackages // {
-					LogAnyAdapterScreen = final.callPackage ./maint/nixpkg/perl/log-any-adapter-screen.nix {};
-					TextTableTiny = final.callPackage ./maint/nixpkg/perl/text-table-tiny.nix {};
-					StringTtyLength = final.callPackage ./maint/nixpkg/perl/string-ttylength.nix {};
-					UnicodeEastAsianWidth = final.callPackage ./maint/nixpkg/perl/unicode-eastasianwidth.nix {};
-					SyntaxConstruct = final.callPackage ./maint/nixpkg/perl/syntax-construct.nix {};
-					DockerNamesRandom = final.callPackage ./maint/nixpkg/perl/docker-names-random.nix {};
-					GetoptLong = final.callPackage ./maint/nixpkg/perl/getopt-long.nix {};
-					GetoptLongDescriptive = final.callPackage ./maint/nixpkg/perl/getopt-long-descriptive.nix {};
-					FileSymlinkRelative = final.callPackage ./maint/nixpkg/perl/file-symlink-relative.nix {};
-					Test2ToolsLoadModule = final.callPackage ./maint/nixpkg/perl/test2-tools-loadmodule.nix {};
-				};
-			};
+			overlays.default = qendpoint-manage.overlays.default;
 		} //
 		flake-utils.lib.eachDefaultSystem (system:
 			let
@@ -55,44 +42,11 @@
 					# For now, this provides the Python runtime environment
 				]);
 
-				# qendpoint-manage dependencies record
-				qendpointManage = {
-					# Perl module dependencies
-					perlModules = ps: with ps; [
-						ClassTiny
-						PathTiny
-						JSONMaybeXS
-						FileWhich
-						CaptureTiny
-						IPCRun
-						ShellConfigGenerate
-						pkgs.perlPackages.GetoptLong
-						pkgs.perlPackages.GetoptLongDescriptive
-						PodUsage
-						LogAny
-						ProcProcessTable
-						pkgs.perlPackages.SyntaxConstruct
-						pkgs.perlPackages.TextTableTiny
-						pkgs.perlPackages.StringTtyLength
-						pkgs.perlPackages.UnicodeEastAsianWidth
-						pkgs.perlPackages.LogAnyAdapterScreen
-						pkgs.perlPackages.DockerNamesRandom
-						ListUtilsBy
-						TestTCP
-						pkgs.perlPackages.FileSymlinkRelative
-						# All other required Perl modules are part of the standard library
-						# or come with the base perl installation
-					];
-
-					# Native binary dependencies
-					nativeDeps = [
-						pkgs.curl  # Used for SPARQL HTTP requests
-						nix-qendpoint.packages.${system}.default  # qendpoint.sh and qepSearch.sh
-					];
-				};
-
 				# Perl environment with qendpoint-manage modules
-				perlEnv = pkgs.perl.withPackages qendpointManage.perlModules;
+				perlEnv = pkgs.perl.withPackages qendpoint-manage.packages.${system}.perlModules;
+
+				# Get qendpoint-manage dependencies from component flake
+				qendpointManageBuildInputs = qendpoint-manage.packages.${system}.buildInputs;
 
 				# Common development environment for biobricks-script-lib
 				commonBuildInputs = [
@@ -115,9 +69,6 @@
 					hdt-cpp.packages.${system}.default
 					hdt-java.packages.${system}.default
 
-					# qendpoint-manage native dependencies
-				] ++ qendpointManage.nativeDeps ++ [
-
 					# Build tools
 					pkgs.gnumake
 
@@ -128,7 +79,7 @@
 					# nixpkgs parallel-full doesn't include parsort which is needed
 					# by biobricks-script-lib. The vendored version is added to PATH
 					# by activate.sh
-				];
+				] ++ qendpointManageBuildInputs;
 
 			in {
 				# Default development shell
@@ -140,6 +91,9 @@
 						if [ -f ./activate.sh ]; then
 							eval $(./activate.sh)
 						fi
+
+						# Add qendpoint-manage bin to PATH
+						export PATH="${self}/component/qendpoint-manage/bin:$PATH"
 
 						echo "BioBricks Script Library environment loaded"
 					'';

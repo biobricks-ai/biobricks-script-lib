@@ -1,4 +1,4 @@
-#!/usr/bin/env perl
+package Bio_Bricks::QEndpoint::App;
 
 use strict;
 use warnings;
@@ -23,6 +23,8 @@ use Shell::Config::Generate;
 use Log::Any '$log';
 use Log::Any::Adapter 'Screen';
 
+use Bio_Bricks::QEndpoint::Instance;
+
 # Detect UTF-8 support and set output encoding
 my $codeset = langinfo(CODESET());
 my $is_utf8 = $codeset =~ /UTF-8/i;
@@ -37,7 +39,7 @@ my $json = JSON::MaybeXS->new->utf8(1)->canonical(1);
 our $SCHEMA_VERSION = 1;
 
 # Default values
-my $CONFIG_DIR = path($ENV{HOME})->child('.config/qendpoint-manage');
+our $CONFIG_DIR = path($ENV{HOME})->child('.config/qendpoint-manage');
 my $DEFAULT_SPARQL = <<~'SPARQL';
 	SELECT *
 	WHERE {
@@ -47,513 +49,7 @@ my $DEFAULT_SPARQL = <<~'SPARQL';
 	SPARQL
 my $DEFAULT_ACCEPT = 'application/sparql-results+json';
 
-my $PROCESS_SENTINEL = path($0)->basename;
-
-package QEndpoint::GraphSet {
-	use Class::Tiny qw(name hdt_files created_at), {
-		dir => sub { $CONFIG_DIR->child('graph-set', shift->name) }
-	};
-	use Log::Any '$log';
-	use Path::Tiny qw(path);
-	use IPC::Run qw(run);
-	use POSIX qw(strftime);
-	use File::Symlink::Relative qw(symlink_r);
-
-	sub config_file { shift->dir->child('graph-set.json') }
-	sub hdt_store_dir { shift->dir }  # HDT files directly in graph-set dir
-
-	sub load {
-		my ($class, $name) = @_;
-		my $self = $class->new(name => $name);
-		return $self unless $self->config_file->exists;
-
-		my $data = $json->decode($self->config_file->slurp_raw);
-		return $class->new(%$data, name => $name, dir => $self->dir);
-	}
-
-	sub save {
-		my $self = shift;
-		$self->dir->mkpath;
-		$self->config_file->spew_raw($json->encode({
-			_version   => $main::SCHEMA_VERSION,
-			created_at => $self->created_at,
-			hdt_files  => $self->hdt_files
-		}));
-	}
-
-	sub exists { shift->config_file->exists }
-
-	sub get_graph_set_name {
-		my ($class, $hdt_file_abs, $md5_hash) = @_;
-		my $cleaned_path = path($hdt_file_abs)->basename;
-		$cleaned_path =~ s/[^a-zA-Z0-9._-]/_/g;
-		return "${cleaned_path}_md5-${md5_hash}";
-	}
-
-	sub create_graph_set {
-		my ($class, $hdt_file_abs, $md5_hash) = @_;
-
-		my $graph_set_name = $class->get_graph_set_name($hdt_file_abs, $md5_hash);
-		my $graph_set = $class->load($graph_set_name);
-
-		if ($graph_set->exists) {
-			$log->info("Using existing graph-set: @{[ $graph_set->dir ]}");
-			return $graph_set->dir;
-		}
-
-		# Create graph-set directory and symlink
-		$graph_set->dir->mkpath;
-		my $hdt_symlink = $graph_set->dir->child('index_dev.hdt');
-		$hdt_symlink->remove if $hdt_symlink->exists;  # Remove if exists
-		symlink_r($hdt_file_abs, $hdt_symlink) or die "Failed to create symlink: $!";
-
-		# Run indexing (this creates index_dev.hdt.index.v1-1)
-		$log->info("Running HDT indexing for graph-set...");
-		my $in = '';  # Empty input
-		my ($stdout, $stderr) = ('', '');
-
-		# Run with output going to both console and variables
-		my $qepSearch = 'qepSearch.sh';
-		my $qepSearch_prefix = "[$qepSearch] ";
-		my $mk_prefixer = sub {
-			my ($collect, $prefix, $fh) = @_;
-			return sub {
-				my $output = $_[0];
-				my $prefixed = $output =~ s/^/$prefix/mgr;
-				print $fh $prefixed;
-				$$collect .= $output;
-			};
-		};
-		my $success = run [$qepSearch, $hdt_symlink],
-			\$in,
-			'>', $mk_prefixer->(\$stdout, $qepSearch_prefix, \*STDOUT),
-			'2>', $mk_prefixer->(\$stderr, $qepSearch_prefix, \*STDERR);
-
-		die "Error: Failed to index HDT file\n$stderr" unless $success;
-		$log->info("Graph-set indexing complete.");
-
-		# Save graph-set configuration
-		$graph_set->created_at(strftime("%Y-%m-%dT%H:%M:%SZ", gmtime()));
-		$graph_set->hdt_files([{
-			path    => $hdt_file_abs,
-			md5     => $md5_hash,
-			symlink => "$hdt_symlink"
-		}]);
-		$graph_set->save;
-
-		$log->info("Graph-set created: @{[ $graph_set->dir ]}");
-		return $graph_set->dir;
-	}
-}
-
-package QEndpoint::Instance {
-	use Class::Tiny qw(instance_id hdt_file hdt_md5 graph_set_dir port pid started_at status), {
-		dir => sub { $CONFIG_DIR->child('instance', shift->instance_id) }
-	};
-
-	use Log::Any '$log';
-
-	use Path::Tiny qw(path);
-	use Capture::Tiny qw(capture);
-
-	use POSIX qw(strftime);
-	use Proc::ProcessTable;
-	use File::Symlink::Relative qw(symlink_r);
-
-	sub config_file { shift->dir->child('instance.json') }
-	sub qendpoint_dir { shift->dir->child('qendpoint') }
-	sub hdt_store_dir { shift->qendpoint_dir->child('hdt-store') }
-	sub log_file { shift->dir->child('qendpoint.log') }
-	sub err_file { shift->dir->child('qendpoint.err') }
-	sub repo_model_file { shift->dir->child('repo_model.ttl') }
-
-	sub is_running {
-		my $pid = shift->pid // return 0;
-		return kill(0, $pid);
-	}
-
-	sub stop {
-		my $self = shift;
-
-		if ($self->is_running) {
-			$log->info("Stopping qendpoint instance @{[ $self->instance_id
-				]} (PID: @{[ $self->pid
-				]}, Port: @{[ $self->port ]})");
-
-			# Kill process group to ensure all child processes are terminated
-			kill 'TERM', -$self->pid;
-
-			# Wait for graceful shutdown
-			my $attempts = 0;
-			while ($self->is_running && $attempts < 10) {
-				sleep 1;
-				$attempts++;
-			}
-
-			# Force kill process group if necessary
-			if ($self->is_running) {
-				$log->warn("Force killing process group @{[ $self->pid ]}");
-				kill 'KILL', -$self->pid;
-			}
-
-			$log->info("Instance stopped");
-		} else {
-			$log->warn("Process @{[ $self->pid ]} was already dead");
-		}
-
-		# Update status to stopped and save
-		$self->status('stopped');
-		$self->save;
-	}
-
-	sub is_process_valid {
-		my $self = shift;
-		my $pid = $self->pid // return 0;
-
-		# First check if PID exists
-		return 0 unless kill(0, $pid);
-
-		# Then verify it's actually a qendpoint-manage process by checking $0 pattern
-		my $pt = Proc::ProcessTable->new;
-
-		for my $p (@{$pt->table}) {
-			next unless $p->pid == $pid;
-			# Try to match both the custom $0 pattern and the original script name
-			return 1 if $p->cmndline =~ /\b\Q$PROCESS_SENTINEL\E\b:?/;
-			last;
-		}
-
-		return 0;  # PID was reused for different process
-	}
-
-
-	sub load {
-		my ($class, $instance_id) = @_;
-		my $self = $class->new(instance_id => $instance_id);
-		return $self unless $self->config_file->exists;
-
-		my $data = $json->decode($self->config_file->slurp_raw);
-		return $class->new(%$data, instance_id => $instance_id);
-	}
-
-	sub save {
-		my $self = shift;
-		$self->dir->mkpath;
-		$self->config_file->spew_raw($json->encode({
-			_version      => $main::SCHEMA_VERSION,
-			instance_id   => $self->instance_id,
-			hdt_file      => $self->hdt_file,
-			hdt_md5       => $self->hdt_md5,
-			graph_set_dir => $self->graph_set_dir,
-			port          => $self->port,
-			pid           => $self->pid,
-			started_at    => $self->started_at,
-			status        => $self->status
-		}));
-	}
-
-	sub endpoint_url {
-		my $self = shift;
-		return "http://localhost:@{[ $self->port ]}/api/endpoint/sparql";
-	}
-
-	sub TO_JSON {
-		my $self = shift;
-
-		# Determine actual status based on process state
-		my $actual_status = $self->status // 'unknown';
-		if ($actual_status eq 'running' && !$self->is_running) {
-			$actual_status = 'stopped';
-		}
-
-		return {
-			instance_id   => $self->instance_id,
-			hdt_file      => $self->hdt_file,
-			hdt_md5       => $self->hdt_md5,
-			graph_set_dir => $self->graph_set_dir,
-			port          => $self->is_running ? $self->port : undef,
-			pid           => $self->is_running ? $self->pid : undef,
-			started_at    => $self->started_at,
-			status        => $actual_status,
-			directory     => $self->dir->stringify,
-			endpoint      => $self->is_running ? $self->endpoint_url : undef
-		};
-	}
-
-	sub create_instance {
-		my ($class, $hdt_file) = @_;
-
-		my $hdt_path = path($hdt_file);
-		die "Error: HDT file not found: $hdt_file\n" unless $hdt_path->exists;
-
-		my $hdt_file_abs = $hdt_path->realpath->stringify;
-		my $md5_hash = QEndpoint::Util::md5_file($hdt_file_abs);
-
-		# Check if this HDT file is already being served by a running instance
-		my @instances = $class->list_all;
-		for my $instance (@instances) {
-			next unless $instance->hdt_file eq $hdt_file_abs && $instance->is_running;
-			$log->warn("HDT file is already being served by a running instance");
-			$log->info("  HDT file: $hdt_file_abs");
-			$log->info("  Instance ID: @{[ $instance->instance_id ]}");
-			$log->info("  Port: @{[ $instance->port ]}");
-			$log->info("  PID: @{[ $instance->pid ]}");
-			return;
-		}
-
-		# Check for existing stopped instance for this HDT file
-		my $existing_instance;
-		for my $instance (@instances) {
-			next unless $instance->hdt_file eq $hdt_file_abs && !$instance->is_running;
-			$existing_instance = $instance;
-			$log->info("Found existing stopped instance: @{[ $instance->instance_id ]}");
-			last;
-		}
-
-		# Check required commands
-		die "Error: qendpoint.sh not found in PATH\n" unless QEndpoint::Util::check_command('qendpoint.sh');
-		die "Error: qepSearch.sh not found in PATH\n" unless QEndpoint::Util::check_command('qepSearch.sh');
-
-		# Set up or reuse graph-set (this handles indexing)
-		my $graph_set_dir = QEndpoint::GraphSet->create_graph_set($hdt_file_abs, $md5_hash);
-
-		# Reuse existing instance or create new one
-		my $instance;
-		if ($existing_instance) {
-			# Verify the graph-set matches
-			if ($existing_instance->graph_set_dir ne "$graph_set_dir") {
-				$log->warn("Graph-set directory mismatch for existing instance, updating...");
-				$log->info("  Old: @{[ $existing_instance->graph_set_dir ]}");
-				$log->info("  New: $graph_set_dir");
-			}
-
-			# Reuse existing instance with fresh runtime settings
-			$instance = $existing_instance;
-			$instance->graph_set_dir("$graph_set_dir");
-
-			# Try to reuse the previous port if it's free, otherwise find a new one.
-			#
-			# NOTE: For better atomicity, one could bind to the port here and hold it
-			# until the new server starts, preventing race conditions with other processes.
-			my $previous_port = $instance->port;
-			if ($previous_port && QEndpoint::Util::is_port_free($previous_port)) {
-				$log->info("Reusing previous port: $previous_port");
-			} else {
-				$instance->port(QEndpoint::Util::find_free_port());
-				$log->info("Previous port unavailable, using new port: @{[ $instance->port ]}");
-			}
-
-			$instance->started_at(strftime("%Y-%m-%dT%H:%M:%SZ", gmtime()));
-			$instance->status('starting');
-			# Keep existing instance_id, hdt_file, hdt_md5
-
-			$log->info("Restarting existing instance: @{[ $instance->instance_id ]}");
-		} else {
-			# Create completely new instance
-			my $instance_id = QEndpoint::Util::generate_instance_id();
-			$instance = $class->new(
-				instance_id   => $instance_id,
-				hdt_file      => $hdt_file_abs,
-				hdt_md5       => $md5_hash,
-				graph_set_dir => "$graph_set_dir",
-				port          => QEndpoint::Util::find_free_port(),
-				started_at    => strftime("%Y-%m-%dT%H:%M:%SZ", gmtime()),
-				status        => 'starting'
-			);
-
-			$log->info("Creating new instance: @{[ $instance->instance_id ]}");
-		}
-
-		# Create instance directory structure
-		$instance->hdt_store_dir->mkpath;
-
-		# Create symlinks to individual files in the graph-set
-		my $graph_set_hdt = path($graph_set_dir)->child('index_dev.hdt');
-		my $graph_set_index = path($graph_set_dir)->child('index_dev.hdt.index.v1-1');
-
-		my $hdt_link = $instance->hdt_store_dir->child('index_dev.hdt');
-		$hdt_link->remove if $hdt_link->exists;
-		symlink_r($graph_set_hdt, $hdt_link) or die "Failed to create HDT symlink: $!";
-
-		# Only create index symlink if it exists (indexing might have just completed)
-		if ($graph_set_index->exists) {
-			my $index_link = $instance->hdt_store_dir->child('index_dev.hdt.index.v1-1');
-			$index_link->remove if $index_link->exists;
-			symlink_r($graph_set_index, $index_link) or die "Failed to create index symlink: $!";
-		}
-
-		# Create repo_model.ttl with port configuration
-		$instance->repo_model_file->spew_utf8(sprintf(
-			"\@prefix mdlc: <http://the-qa-company.com/modelcompiler/> .\n\n"
-			. "# Describe the endpoint server port\n"
-			. "mdlc:main mdlc:serverPort %d .\n",
-			$instance->port
-		));
-
-		$ENV{JAVA_OPTIONS} = join ' ', qw(
-			-Dspring.autoconfigure.exclude=org.springframework.boot.autoconfigure.http.client.HttpClientAutoConfiguration
-			-Dspring.devtools.restart.enabled=false
-		);
-
-		# Start qendpoint as daemon
-		$log->info("Starting qendpoint instance @{[ $instance->instance_id ]} on port @{[ $instance->port ]}...");
-		$log->info("HDT file: $hdt_file_abs");
-		$log->info("Graph-set: $graph_set_dir");
-		$log->info("Instance: @{[ $instance->dir ]}");
-		$log->info("Logs: @{[ $instance->log_file ]}");
-
-		# Fork and start qendpoint
-		my $pid = fork;
-		if (!defined $pid) {
-			die "Failed to fork: $!\n";
-		} elsif ($pid == 0) {
-			# Child process - become process group leader
-			setpgrp(0, 0) or die "Cannot setpgrp: $!\n";
-
-			chdir $instance->dir or die "Cannot chdir to @{[ $instance->dir ]}: $!\n";
-			open STDOUT, '>', $instance->log_file->stringify or die "Cannot redirect stdout: $!\n";
-			open STDERR, '>', $instance->err_file->stringify or die "Cannot redirect stderr: $!\n";
-
-			# Set process name for identification
-			$0 = "$PROCESS_SENTINEL: @{[ $instance->instance_id ]}";
-
-			# Use system instead of exec to maintain process control
-			0 == system('qendpoint.sh') or die "Cannot run qendpoint.sh\n";
-			exit;
-		}
-
-		# Update instance with PID and save
-		$instance->pid($pid);
-		$instance->status('running');
-
-		# Wait a moment to check if process started successfully
-		sleep 2;
-		unless ($instance->is_running) {
-			die "Error: Failed to start qendpoint process\nCheck error log: @{[ $instance->err_file ]}\n";
-		}
-
-		# Save configuration
-		$instance->save;
-
-		$log->info("Qendpoint started successfully!");
-		say "Instance ID: @{[ $instance->instance_id ]}";
-		say "Port: @{[ $instance->port ]}";
-		say "PID: @{[ $instance->pid ]}";
-		$log->debug("  Instance directory: @{[ $instance->dir ]}");
-		$log->debug("  Graph-set directory: $graph_set_dir");
-
-		return $instance;
-	}
-
-	sub list_all {
-		my ($class) = @_;
-		my $instances_dir = $CONFIG_DIR->child('instance');
-		return () unless $instances_dir->exists;
-
-		my @instances;
-		for my $instance_dir ($instances_dir->children) {
-			next unless $instance_dir->is_dir;
-			my $instance_id = $instance_dir->basename;
-			my $instance = $class->load($instance_id);
-			push @instances, $instance if $instance->config_file->exists;
-		}
-
-		return @instances;
-	}
-
-	sub find_instance {
-		my ($class, $identifier) = @_;
-
-		# Get all instances
-		my @instances = $class->list_all;
-
-		# First check if it's an instance ID
-		for my $instance (@instances) {
-			return $instance if $instance->instance_id eq $identifier;
-		}
-
-		# Then check if it's an HDT file path
-		my $hdt_path_abs = eval { realpath($identifier) } || $identifier;
-		for my $instance (@instances) {
-			return $instance if $instance->hdt_file eq $hdt_path_abs || $instance->hdt_file eq $identifier;
-		}
-
-		return undef;
-	}
-}
-
-package QEndpoint::Util {
-	use File::Which qw(which);
-	use Path::Tiny qw(path);
-	use Capture::Tiny qw(capture);
-	use Net::EmptyPort qw(empty_port check_port);
-	use Docker::Names::Random;
-
-	sub check_command {
-		my $cmd = shift;
-		return defined which($cmd);
-	}
-
-	sub find_free_port {
-		return empty_port();
-	}
-
-	sub is_port_free {
-		my $port = shift;
-		return !check_port($port);
-	}
-
-	sub generate_instance_id {
-		my $dnr = Docker::Names::Random->new();
-
-		my $instances_dir = $CONFIG_DIR->child('instance');
-		$instances_dir->mkpath;
-
-		# Try to get a unique name
-		for my $attempt (1..10) {
-			my $nice_name = $dnr->docker_name();
-			$nice_name =~ s/_/-/g;
-
-			# After some attempts, enable timestamp suffix flag
-			my $use_suffix = $attempt > 5;
-			if ($use_suffix) {
-				my $timestamp = time();
-				my $random = int(rand(1000));
-				$nice_name = sprintf("%s_%d_%03d", $nice_name, $timestamp, $random);
-			}
-
-			# Create temporary directory in instances dir
-			my $temp_dir = Path::Tiny->tempdir(
-				DIR     => $instances_dir,
-				CLEANUP => 0
-			);
-
-			my $target_dir = $instances_dir->child($nice_name);
-
-			# Try atomic move (rename(2) on same filesystem)
-			if (eval { $temp_dir->move($target_dir); 1 }) {
-				return $nice_name;
-			}
-
-			# Move failed (name collision), cleanup and try again
-			$temp_dir->remove_tree if $temp_dir->exists;
-		}
-
-		die "Could not generate unique instance name after 10 attempts";
-	}
-
-	sub md5_file {
-		my $file = shift;
-		my $file_path = path($file);
-
-		# Use md5sum from coreutils (guaranteed in Nix environment)
-		my ($stdout, $stderr, $exit) = capture { system('md5sum', $file_path) };
-		die "md5sum failed: $stderr" if $exit;
-		return (split /\s+/, $stdout)[0];
-	}
-}
-
-package main;
+our $PROCESS_SENTINEL = path($0)->basename;
 
 # Format shortcuts
 my %FORMAT_TO_MIME_MAP = (
@@ -632,7 +128,7 @@ sub validate_constraints ($opt, $usage) {
 
 sub start_qendpoint {
 	my $hdt_file = shift;
-	QEndpoint::Instance->create_instance($hdt_file);
+	Bio_Bricks::QEndpoint::Instance->create_instance($hdt_file);
 }
 
 sub query_qendpoint {
@@ -642,7 +138,7 @@ sub query_qendpoint {
 	$accept_format //= $DEFAULT_ACCEPT;
 
 	# Get all running instances
-	my @instances = QEndpoint::Instance->list_all;
+	my @instances = Bio_Bricks::QEndpoint::Instance->list_all;
 	my @running_instances = grep { $_->is_running } @instances;
 
 	die "Error: No qendpoint instances appear to be running.\n"
@@ -657,7 +153,7 @@ sub query_qendpoint {
 	}
 
 	# Find the instance by HDT file path or instance ID
-	my $found_instance = QEndpoint::Instance->find_instance($target);
+	my $found_instance = Bio_Bricks::QEndpoint::Instance->find_instance($target);
 
 	unless ($found_instance && $found_instance->is_running) {
 		$log->error("No running qendpoint instance found for: $target");
@@ -687,7 +183,7 @@ sub query_qendpoint {
 sub list_instances {
 	my ($output_format) = @_;
 
-	my @instances = QEndpoint::Instance->list_all;
+	my @instances = Bio_Bricks::QEndpoint::Instance->list_all;
 
 	unless (@instances) {
 		$log->warn("No instances found");
@@ -735,7 +231,7 @@ sub stop_instance {
 	my ($target) = @_;
 
 	# Find the instance by HDT file path or instance ID
-	my $instance = QEndpoint::Instance->find_instance($target);
+	my $instance = Bio_Bricks::QEndpoint::Instance->find_instance($target);
 
 	unless ($instance) {
 		die "Error: No qendpoint instance found for: $target\n";
@@ -748,7 +244,7 @@ sub stop_all_instances {
 	$log->info("Stopping all running instances...");
 
 	# Get all instances
-	my @instances = QEndpoint::Instance->list_all;
+	my @instances = Bio_Bricks::QEndpoint::Instance->list_all;
 	my @running_instances = grep { $_->is_running } @instances;
 
 	unless (@running_instances) {
@@ -770,7 +266,7 @@ sub shell_config {
 	my ($target) = @_;
 
 	# Find the instance by HDT file path or instance ID
-	my $instance = QEndpoint::Instance->find_instance($target);
+	my $instance = Bio_Bricks::QEndpoint::Instance->find_instance($target);
 
 	unless ($instance && $instance->is_running) {
 		die "Error: No running qendpoint instance found for: $target\n";
@@ -788,7 +284,7 @@ sub cleanup_instances {
 	$log->info("Cleaning up stopped instances...");
 
 	# Get all instances
-	my @instances = QEndpoint::Instance->list_all;
+	my @instances = Bio_Bricks::QEndpoint::Instance->list_all;
 	my $removed = 0;
 
 	for my $instance (@instances) {
@@ -920,6 +416,7 @@ my %DISPATCH = (
 	},
 );
 
+sub run {
 # Main script
 my $subcommand = shift @ARGV || '';
 
@@ -949,7 +446,7 @@ if (!$subcommand || $subcommand eq 'help' || $subcommand eq '--help' || $subcomm
 
 # Handle --man at top level
 if ($subcommand eq '--man') {
-	pod2usage(-exitval => 0, -verbose => 2);
+	pod2usage(-input => __FILE__, -exitval => 0, -verbose => 2);
 }
 
 # Check if subcommand exists
@@ -994,6 +491,9 @@ if ($@) {
 
 # Execute the handler
 $cmd_info->{handler}->($opt, $usage);
+}
+
+1;
 
 __END__
 
