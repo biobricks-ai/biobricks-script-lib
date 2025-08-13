@@ -3,10 +3,12 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-23.05";
+    nixpkgs-25_05.url = "github:nixos/nixpkgs/nixos-25.05";
+    nixpkgs-lakectl.follows = "nixpkgs-25_05";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, nixpkgs-25_05, nixpkgs-lakectl }:
     let
       perlPkgs = import ../../maint/nixpkg/perl-package.nix;
     in {
@@ -17,6 +19,11 @@
         pkgs = import nixpkgs {
           inherit system;
           overlays = [ self.overlays.default ];
+        };
+
+        # Import newer nixpkgs for lakectl
+        pkgs-lakectl = import nixpkgs-lakectl {
+          inherit system;
         };
 
         # Development mode flag
@@ -94,6 +101,7 @@
         # Build inputs for development
         buildInputs = [
           perlEnv
+          pkgs-lakectl.lakectl  # lakectl from newer nixpkgs
           pkgs.perl  # For bare perl commands
         ];
 
