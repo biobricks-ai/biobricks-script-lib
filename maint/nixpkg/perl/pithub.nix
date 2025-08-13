@@ -8,7 +8,7 @@ perlPackages.buildPerlPackage {
 		hash = "sha256-X3mLcSpt5Bk0rB8F6DOngsRwVhZQ5fUUwtwaXP0OZyM=";
 	};
 	buildInputs = with perlPackages; [ ImportInto PathTiny TestDifferences TestException TestMost TestNeeds ];
-	propagatedBuildInputs = with perlPackages; [ CHI HTTPMessage JSONMaybeXS LWP Moo URI ];
+	propagatedBuildInputs = with perlPackages; [ CHI HTTPMessage JSONMaybeXS LWP LWPProtocolhttps Moo URI ];
 	meta = {
 		homepage = "https://github.com/plu/Pithub";
 		description = "Github v3 API";
