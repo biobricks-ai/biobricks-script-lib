@@ -1,0 +1,51 @@
+# Inter-component dependencies
+# (None - this is the base component)
+
+requires 'aliased';
+requires 'Carp';
+requires 'Devel::StrictMode';
+requires 'Env::Dot';
+requires 'Exporter::Tiny';
+requires 'Feature::Compat::Try';
+requires 'File::HomeDir';
+requires 'File::Which';
+requires 'HTTP::Tiny';
+requires 'IPC::Run3';
+requires 'IPC::System::Simple';
+requires 'JSON::PP';
+requires 'kura';
+requires 'Log::Any::Adapter::Screen';
+requires 'Moo';
+requires 'MooX::Log::Any';
+requires 'MooX::ShortHas';
+requires 'MooX::Struct';
+requires 'Mu';
+requires 'namespace::autoclean';
+requires 'Number::Bytes::Human';
+requires 'Object::Util';
+requires 'Path::Tiny';
+requires 'Paws';
+requires 'PerlX::Maybe';
+requires 'Pithub';
+requires 'results';
+requires 'Sub::HandlesVia';
+requires 'Text::CSV';
+requires 'Types::Path::Tiny';
+requires 'Types::Standard';
+requires 'Type::Tiny';
+requires 'URI::s3';
+requires 'YAML::XS';
+
+on test => sub {
+	requires 'Term::Table';
+	requires 'Test2::V0';
+	requires 'Test::Exception';
+	requires 'Test::More';
+	requires 'Test::Simple', '>= 1.302175';  # TestSimple13 in nix
+};
+
+on develop => sub {
+	requires 'Carp::Always';
+	requires 'Data::Printer';
+	requires 'Devel::Cover';
+};
