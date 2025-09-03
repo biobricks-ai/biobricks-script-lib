@@ -34,11 +34,27 @@ git submodule update --init --recursive
 
 ## Nix Flake Usage
 
-When using Nix, you can import the flake directly from the vendored path:
+There are two approaches to use `biobricks-script-lib` as a Nix flake:
 
 ```nix
 {
 	inputs = {
+		### Standard imports:
+		nixpkgs.url = "github:nixos/nixpkgs/nixos-23.05";
+		flake-utils.url = "github:numtide/flake-utils";
+
+		### Approach 1: Remote Repository (Recommended) {{{
+		###
+		### Import the flake directly from GitHub:
+
+		biobricks-script-lib.url = "github:biobricks-ai/biobricks-script-lib";
+
+		### }}}
+
+		### Approach 2: Git Submodule {{{
+		###
+		### If you need to use a local vendored copy.
+
 		# Required for Nix 2.27.0+ when using git submodules
 		self.submodules = true;
 
@@ -47,6 +63,9 @@ When using Nix, you can import the flake directly from the vendored path:
 			# Override nested component to prevent path resolution issues
 			inputs.qendpoint-manage.url = "path:./vendor/biobricks-script-lib/component/qendpoint-manage";
 		};
+
+		### }}}
+
 	};
 
 	outputs = { self, nixpkgs, flake-utils, biobricks-script-lib }:
@@ -58,8 +77,10 @@ When using Nix, you can import the flake directly from the vendored path:
 					] ++ biobricks-script-lib.packages.${system}.buildInputs;
 
 					shellHook = ''
-						# Activate biobricks-script-lib environment
-						eval $(${biobricks-script-lib.packages.${system}.activateScript})
+						# Inherit the complete shellHook from biobricks-script-lib
+						${biobricks-script-lib.devShells.${system}.default.shellHook or ""}
+
+						# Add any project-specific setup here
 					'';
 				};
 			});
