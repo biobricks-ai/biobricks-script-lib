@@ -88,8 +88,8 @@
 
 					shellHook = ''
 						# Activate biobricks-script-lib environment if activate.sh exists
-						if [ -f ./activate.sh ]; then
-							eval $(./activate.sh)
+						if [ -f "${self}"/activate.sh ]; then
+							eval $("${self}"/activate.sh)
 						fi
 
 						# Add qendpoint-manage bin to PATH
