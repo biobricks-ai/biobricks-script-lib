@@ -28,11 +28,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1695663107,
-        "narHash": "sha256-uYHG4+WvYykdWWU2LjmirgenMKpZ6+E1otmztIdQBPc=",
+        "lastModified": 1756934356,
+        "narHash": "sha256-ujUXGYKlDSJMKjRgMX/eMDBe0ZK9kfIPkkfyaTYDH4g=",
         "owner": "insilica",
         "repo": "nix-hdt",
-        "rev": "5451dd285423e5a2c386dc05b1bf10d93654df56",
+        "rev": "adae60ade3adf8abf509d025ea3e9144f90628f3",
         "type": "github"
       },
       "original": {
