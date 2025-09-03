@@ -40,6 +40,7 @@ There are two approaches to use `biobricks-script-lib` as a Nix flake:
 {
 	inputs = {
 		### Standard imports:
+		# NOTE: Update version as needed.
 		nixpkgs.url = "github:nixos/nixpkgs/nixos-23.05";
 		flake-utils.url = "github:numtide/flake-utils";
 
