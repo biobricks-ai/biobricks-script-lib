@@ -47,7 +47,11 @@ There are two approaches to use `biobricks-script-lib` as a Nix flake:
 		###
 		### Import the flake directly from GitHub:
 
-		biobricks-script-lib.url = "github:biobricks-ai/biobricks-script-lib";
+		biobricks-script-lib = {
+			url = "github:biobricks-ai/biobricks-script-lib";
+			inputs.nixpkgs.follows = "nixpkgs";
+			inputs.flake-utils.follows = "flake-utils";
+		};
 
 		### }}}
 
@@ -60,6 +64,8 @@ There are two approaches to use `biobricks-script-lib` as a Nix flake:
 
 		biobricks-script-lib = {
 			url = "path:./vendor/biobricks-script-lib";
+			inputs.nixpkgs.follows = "nixpkgs";
+			inputs.flake-utils.follows = "flake-utils";
 			# Override nested component to prevent path resolution issues
 			inputs.qendpoint-manage.url = "path:./vendor/biobricks-script-lib/component/qendpoint-manage";
 		};
