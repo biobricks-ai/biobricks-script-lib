@@ -42,7 +42,11 @@ When using Nix, you can import the flake directly from the vendored path:
 		# Required for Nix 2.27.0+ when using git submodules
 		self.submodules = true;
 
-		biobricks-script-lib.url = "path:./vendor/biobricks-script-lib";
+		biobricks-script-lib = {
+			url = "path:./vendor/biobricks-script-lib";
+			# Override nested component to prevent path resolution issues
+			inputs.qendpoint-manage.url = "path:./vendor/biobricks-script-lib/component/qendpoint-manage";
+		};
 	};
 
 	outputs = { self, nixpkgs, flake-utils, biobricks-script-lib }:
