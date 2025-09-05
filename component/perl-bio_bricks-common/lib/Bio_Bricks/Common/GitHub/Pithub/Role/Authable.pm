@@ -19,8 +19,8 @@ around BUILDARGS => fun ($orig, $class, @args) {
 
 	if (!exists $args->{token}) {
 		try {
-			my $auth = Auth->new();
-			my $token = $auth->get_token();
+			my $auth = Auth->new;
+			my $token = $auth->get_token;
 			$args->{token} = $token if defined $token;
 		} catch ($e) {
 			# Silently continue without token if auth fails
