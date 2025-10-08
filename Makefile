@@ -6,6 +6,7 @@ include $(ROOT_DIR)/inc/make/help.mk
 include $(ROOT_DIR)/inc/make/guard.mk
 
 # Include component Makefiles
+include $(ROOT_DIR)/maint/nixpkg/Makefile
 
 ifneq (,$(wildcard ./.env))
 	include .env

@@ -1,0 +1,82 @@
+## DO NOT EDIT DIRECTLY
+##
+## Generated from <maint/nixpkg/perl-package.nix.tt2>.
+##
+## To regenerate:
+##   tpage --define perl_dir=maint/nixpkg/perl \
+##         maint/nixpkg/perl-package.nix.tt2 > maint/nixpkg/perl-package.nix
+[%#
+=head1 NAME
+
+perl-package.nix.tt2 - Template for generating perl-package.nix
+
+=head1 DESCRIPTION
+
+Scans all .nix files in the perl/ directory and extracts pname values to
+generate the perlPackageMap.
+
+=head2 Override Comment Syntax
+
+To override the auto-generated mapping key, add a trailing comment:
+
+    pname = "Foo-Bar";  # nix-key: FooBarCustom
+
+=cut
+-%]
+[%- TRY -%]
+[% USE perl_files = Directory(perl_dir) -%]
+[% packages = {} -%]
+[% FOREACH file IN perl_files.files -%]
+  [% NEXT UNLESS file.name.match('\.nix$') -%]
+  [% content = INSERT $file.path -%]
+  [% basename = file.name.remove('\.nix$') -%]
+  [%# Extract pname and optional nix-key override -%]
+  [% pname_re = '(?xms)
+       pname \s* = \s* "([^"]+)" \s* ;  # capture pname value
+       (?:\s* [#] \s* nix-key: \s* (\S+))?  # optional nix-key override comment
+     ';
+     matches = content.match(pname_re, 1);
+  -%]
+  [% IF matches -%]
+    [% pname = matches.0 -%]
+    [% override_key = matches.1 -%]
+    [%# Generate key: remove hyphens but keep underscores -%]
+    [% key = override_key ? override_key : pname.remove('-') -%]
+    [% packages.$key = basename -%]
+  [% END -%]
+[% END -%]
+[% CATCH -%]
+[%# Error reading perl directory -%]
+[% END -%]
+[%# Calculate max key length for alignment -%]
+[% max_len = 0;
+   FOREACH key IN packages.keys;
+     IF key.length > max_len;
+       max_len = key.length;
+     END;
+   END;
+   pad_len = max_len + 2;
+-%]
+
+let
+  # Centralized Perl package mappings for all components
+  # Maps Perl package names to their .nix file base names in maint/nixpkg/perl/
+
+  # sorted map
+  perlPackageMap = {
+[% FOREACH key IN packages.keys.sort -%]
+    [% key FILTER format("%-${pad_len}s") %] = "[% packages.$key %]";
+[% END -%]
+  };
+in {
+  inherit perlPackageMap;
+
+  # Function to create the overlay using the centralized package map
+  mkPerlPackagesOverlay = nixpkgs: final: prev: {
+    perlPackages = prev.perlPackages // (
+      nixpkgs.lib.mapAttrs
+        (name: nixFile: final.callPackage ./perl/${nixFile}.nix {})
+        perlPackageMap
+    );
+  };
+}
