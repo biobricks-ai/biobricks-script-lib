@@ -1,7 +1,7 @@
 { perlPackages, fetchurl, lib }:
 
 perlPackages.buildPerlPackage {
-	pname = "Test-Simple";
+	pname = "Test-Simple"; # nix-key: TestSimple13
 	version = "1.302214";
 	src = fetchurl {
 		url = "mirror://cpan/authors/id/E/EX/EXODIST/Test-Simple-1.302214.tar.gz";
