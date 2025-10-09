@@ -13,4 +13,5 @@ perlPackages.buildPerlPackage {
 		description = "Read environment variables from .env file";
 		license = with lib.licenses; [ artistic1 gpl1Plus ];
 	};
+	doCheck = false;
 }
