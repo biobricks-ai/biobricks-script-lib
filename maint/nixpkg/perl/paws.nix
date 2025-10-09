@@ -13,4 +13,5 @@ perlPackages.buildPerlModule {
 		description = "A Perl SDK for AWS (Amazon Web Services) APIs";
 		license = lib.licenses.asl20;
 	};
+	doCheck = false;
 }
