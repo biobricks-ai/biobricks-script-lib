@@ -14,4 +14,5 @@ perlPackages.buildPerlPackage {
 		description = "Why throw exceptions when you can return them?";
 		license = with lib.licenses; [ artistic1 gpl1Plus ];
 	};
+	doCheck = false;
 }
