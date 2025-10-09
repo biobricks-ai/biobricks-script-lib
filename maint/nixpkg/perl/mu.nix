@@ -11,6 +11,6 @@ perlPackages.buildPerlPackage {
 	meta = {
 		homepage = "https://github.com/wchristian/Mu";
 		description = "Moo but with less typing";
-		license = lib.licenses.unfreeRedistributable;
+		license = lib.licenses.cc0;
 	};
 }
