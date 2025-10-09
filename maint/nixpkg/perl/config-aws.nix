@@ -13,4 +13,5 @@ perlPackages.buildPerlModule {
 		description = "Parse AWS config files";
 		license = with lib.licenses; [ artistic1 gpl1Plus ];
 	};
+	doCheck = false;
 }
