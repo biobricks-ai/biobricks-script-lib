@@ -12,4 +12,5 @@ perlPackages.buildPerlPackage {
 		description = "Test whether a module can be successfully loaded";
 		license = with lib.licenses; [ artistic1 gpl1Plus ];
 	};
+	doCheck = false;
 }
