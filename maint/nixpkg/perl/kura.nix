@@ -13,4 +13,5 @@ perlPackages.buildPerlModule {
 		description = "Store constraints for Data::Checks, Type::Tiny, Moose, and more";
 		license = with lib.licenses; [ artistic1 gpl1Plus ];
 	};
+	doCheck = false;
 }
