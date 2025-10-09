@@ -12,6 +12,6 @@ perlPackages.buildPerlPackage {
 	meta = {
 		homepage = "https://github.com/wchristian/MooX-ShortHas";
 		description = "Shortcuts for common Moo has attribute configurations";
-		license = lib.licenses.unfreeRedistributable;
+		license = lib.licenses.cc0;
 	};
 }
