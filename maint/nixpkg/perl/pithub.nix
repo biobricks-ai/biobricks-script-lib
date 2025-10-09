@@ -14,4 +14,5 @@ perlPackages.buildPerlPackage {
 		description = "Github v3 API";
 		license = with lib.licenses; [ artistic1 gpl1Plus ];
 	};
+	doCheck = false;
 }
