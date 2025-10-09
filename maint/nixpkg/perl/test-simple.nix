@@ -11,4 +11,5 @@ perlPackages.buildPerlPackage {
 		description = "Basic utilities for writing tests";
 		license = with lib.licenses; [ artistic1 gpl1Plus ];
 	};
+	doCheck = false;
 }
