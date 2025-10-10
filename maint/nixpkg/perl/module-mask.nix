@@ -7,6 +7,7 @@ perlPackages.buildPerlPackage {
 		url = "mirror://cpan/authors/id/M/MA/MATTLAW/Module-Mask-0.06.tar.gz";
 		hash = "sha256-LXP4H/Icn6KBAnkeVG/yVxZLMCX3gyVEyCI/uHwefnc=";
 	};
+	buildInputs = with perlPackages; [ ModuleBuild ];
 	propagatedBuildInputs = with perlPackages; [ ModuleUtil ];
 	meta = {
 		description = "Pretend certain modules are not installed";
