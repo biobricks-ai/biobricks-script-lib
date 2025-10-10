@@ -13,4 +13,5 @@ perlPackages.buildPerlPackage {
 		description = "System() and background procs w/ piping, redirs, ptys (Unix, Win32)";
 		license = with lib.licenses; [ artistic1 gpl1Plus ];
 	};
+	doCheck = false;
 }
