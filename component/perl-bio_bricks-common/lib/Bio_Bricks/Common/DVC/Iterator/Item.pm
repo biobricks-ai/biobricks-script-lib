@@ -22,7 +22,8 @@ ro parent_directory => (
 
 # Computed attributes from output
 method path_segments () {
-	my @segments = split('/', $self->output->path);
+	my $path = $self->output->path;
+	my @segments = grep length, split '/', $path;
 	return \@segments;
 }
 
