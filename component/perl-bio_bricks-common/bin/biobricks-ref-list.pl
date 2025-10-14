@@ -231,6 +231,10 @@ fun output_file_info($fh, $format, $csv, $info) {
 		]);
 	} elsif ($format eq 'json') {
 		say $fh JSON::PP->new->utf8->encode($info);
+	} elsif ($format eq 'md5sum') {
+		# Format: MD5HASH  FILENAME
+		# Compatible with md5sum -c
+		printf $fh "%s  %s\n", $info->{file_hash}, $info->{file_path};
 	}
 }
 
@@ -287,7 +291,7 @@ biobricks-ref-list.pl [options] BIOBRICKS_REF
   BIOBRICKS_REF format: https://github.com/biobricks-ai/REPO#SHA
 
   Options:
-	--format=FORMAT    Output format: text (default), csv, json
+	--format=FORMAT    Output format: text (default), csv, json, md5sum
 	--output=FILE      Output file (default: stdout)
 	--help             Show this help message
 
@@ -303,6 +307,13 @@ biobricks-ref-list.pl [options] BIOBRICKS_REF
   # Output as JSON (one object per line)
   biobricks-ref-list.pl --format=json \
 	https://github.com/biobricks-ai/biobricks-okg
+
+  # Output as md5sum format for verification
+  biobricks-ref-list.pl --format=md5sum --output=checksums.md5 \
+	https://github.com/biobricks-ai/dbsnp#f0a35902927ad6c23247429585ba3f13c412941a
+
+  # Verify checksums after downloading files
+  md5sum -c checksums.md5
 
 =head1 DESCRIPTION
 
