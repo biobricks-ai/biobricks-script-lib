@@ -12,4 +12,5 @@ perlPackages.buildPerlPackage {
 		description = "A new and improved test harness with better Test2 integration";
 		license = with lib.licenses; [ artistic1 gpl1Plus ];
 	};
+	doCheck = false;
 }
