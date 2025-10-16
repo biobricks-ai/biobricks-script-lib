@@ -76,6 +76,13 @@ ro update_single_cardinality => (
 	default => 0,
 );
 
+# Queue load request if another is running (allows up to 64 jobs queued)
+# Default: FALSE (matches AWS default - will fail if another load is running)
+ro queue_request => (
+	isa => Bool,
+	default => 0,
+);
+
 # Valid parallelism levels
 my %VALID_PARALLELISM = map { $_ => 1 } qw(LOW MEDIUM HIGH OVERSUBSCRIBE);
 
@@ -152,6 +159,7 @@ method build_load_request(Str :$source_uri, Str :$format, Maybe[Str] :$graph_uri
 		region => $self->region,
 		failOnError => $self->fail_on_error ? 'TRUE' : 'FALSE',
 		parallelism => $self->parallelism,
+		queueRequest => $self->queue_request ? 'TRUE' : 'FALSE',
 	};
 
 	# Add single cardinality update if enabled
