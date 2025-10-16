@@ -6,6 +6,7 @@ use LWP::UserAgent;
 use URI;
 use Bio_Bricks::Common::Config;
 use MooX::Log::Any;
+use IO::Socket::SSL qw(SSL_VERIFY_NONE);
 
 with qw(MooX::Log::Any);
 
@@ -17,10 +18,18 @@ Bio_Bricks::Store::Neptune - AWS Neptune graph database interface
 
 	use Bio_Bricks::Store::Neptune;
 
+	# Direct connection to Neptune
 	my $neptune = Bio_Bricks::Store::Neptune->new(
 		endpoint => 'my-neptune-cluster.amazonaws.com',
 		port     => 8182,
 		region   => 'us-east-1',
+	);
+
+	# Connection through localhost tunnel (SSM/SSH port forwarding)
+	my $neptune = Bio_Bricks::Store::Neptune->new(
+		endpoint   => 'localhost',
+		port       => 8182,
+		ssl_verify => 0,  # Disable SSL verification
 	);
 
 	# Check cluster status
@@ -65,6 +74,14 @@ ro use_https => (
 	default => 1,
 );
 
+# Verify SSL certificates and hostname (default: true)
+# Set to false to disable all SSL verification when using localhost tunnels
+# (e.g., SSH/SSM port forwarding)
+ro ssl_verify => (
+	isa => Bool,
+	default => 1,
+);
+
 =attr base_url
 
 Returns the base URL for Neptune API requests as a URI object.
@@ -102,6 +119,15 @@ method _build_ua() {
 		timeout => $self->timeout,
 		agent => 'Bio_Bricks::Store::Neptune/' . ($Bio_Bricks::Store::Neptune::VERSION // 'dev'),
 	);
+
+	# Disable SSL certificate and hostname verification if requested (for localhost tunnels)
+	unless ($self->ssl_verify) {
+		$ua->ssl_opts(
+			verify_hostname => 0,              # Disable hostname verification
+			SSL_verify_mode => SSL_VERIFY_NONE, # Disable certificate verification
+		);
+		$self->log->warn("SSL certificate and hostname verification disabled - only use with localhost tunnels!");
+	}
 
 	$self->log->debug("Created HTTP client with timeout: " . $self->timeout);
 	return $ua;
