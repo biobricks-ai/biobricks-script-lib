@@ -13,6 +13,7 @@ use Text::Table::Tiny qw(generate_table);
 use I18N::Langinfo qw(langinfo CODESET);
 use POSIX qw(strftime);
 use Bio_Bricks::Store::Neptune;
+use Bio_Bricks::Store::Neptune::LoaderCache;
 use Log::Any::Adapter ('Screen');
 use Log::Any qw($log);
 
@@ -57,6 +58,11 @@ my $neptune = Bio_Bricks::Store::Neptune->new(
 	ssl_verify => $opts{ssl_verify},
 );
 
+# Create LoaderCache for efficient status fetching
+my $loader_cache = Bio_Bricks::Store::Neptune::LoaderCache->new(
+	neptune => $neptune,
+);
+
 my $json = JSON::PP->new->pretty->canonical;
 
 # Get list of load IDs to process
@@ -65,9 +71,8 @@ if (@{$opts{load_id}}) {
 	# Use specified load IDs
 	@load_ids_to_check = @{$opts{load_id}};
 } else {
-	# Get all recent load IDs
-	my $status = $neptune->get_loader_status();
-	@load_ids_to_check = @{$status->{payload}{loadIds} // []};
+	# Get all recent load IDs (uses cache)
+	@load_ids_to_check = $loader_cache->get_all_load_ids();
 }
 
 # Apply limit if specified
@@ -75,10 +80,10 @@ if ($opts{limit} > 0 && @load_ids_to_check > $opts{limit}) {
 	@load_ids_to_check = @load_ids_to_check[0 .. $opts{limit} - 1];
 }
 
-# Fetch detailed status for each load
+# Fetch detailed status for each load (uses cache for completed/failed jobs)
 my @jobs;
 for my $load_id (@load_ids_to_check) {
-	my $status = $neptune->get_loader_status($load_id);
+	my $status = $loader_cache->get_job_status($load_id);
 	my $job = $status->{payload}{overallStatus};
 	if ($job) {
 		$job->{load_id} = $load_id;
