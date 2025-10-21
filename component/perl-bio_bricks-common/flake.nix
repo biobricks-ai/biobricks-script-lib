@@ -102,7 +102,8 @@
         buildInputs = [
           perlEnv
           pkgs-lakectl.lakectl  # lakectl from newer nixpkgs
-          pkgs.perl  # For bare perl commands
+          pkgs.rclone           # rclone for S3 transfers
+          pkgs.perl             # For bare perl commands
         ];
 
       in {
