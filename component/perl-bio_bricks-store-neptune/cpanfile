@@ -1,0 +1,26 @@
+# Inter-component dependencies
+# These are Bio_Bricks modules from other components
+requires 'Bio_Bricks::Common::Config';
+requires 'Bio_Bricks::Common::Setup';
+
+requires 'CHI';
+requires 'File::HomeDir';
+requires 'IO::Socket::SSL';
+requires 'LWP::UserAgent';
+requires 'MooX::Log::Any';
+requires 'Mu';
+requires 'Path::Tiny';
+requires 'Types::Common::String';
+requires 'Types::Path::Tiny';
+requires 'Types::Standard';
+requires 'URI';
+requires 'URI::s3';
+
+on test => sub {
+	requires 'Test::More';
+	requires 'Test2::V0';
+};
+
+on develop => sub {
+	requires 'Devel::Cover';
+};
