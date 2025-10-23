@@ -1,0 +1,20 @@
+# Inter-component dependencies
+# These are Bio_Bricks modules from other components
+requires 'Bio_Bricks::Common::Setup';
+
+requires 'Carp';
+requires 'File::Which';
+requires 'Moo';
+requires 'HTTP::Tiny';
+requires 'JSON::PP';
+requires 'MIME::Base64';
+requires 'Path::Tiny';
+
+on test => sub {
+	requires 'Test::More';
+	requires 'Test::Exception';
+};
+
+on develop => sub {
+	requires 'Devel::Cover';
+};

@@ -1,0 +1,13 @@
+# Perl
+MYMETA.*
+blib/
+
+# Module::Build
+Build
+_build/
+
+# Devel::Cover
+cover_db/
+
+# Nix
+result
