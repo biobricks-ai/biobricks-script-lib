@@ -1,0 +1,39 @@
+# Inter-component dependencies
+# These are Bio_Bricks modules from other components
+requires 'Bio_Bricks::Common::AWS::Paws';
+requires 'Bio_Bricks::Common::AWS::Rclone';
+requires 'Bio_Bricks::Common::Config';
+requires 'Bio_Bricks::Common::DVC::Iterator';
+requires 'Bio_Bricks::Common::DVC::LockParser';
+requires 'Bio_Bricks::Common::GitHub::Pithub';
+requires 'Bio_Bricks::Common::Output';
+requires 'Bio_Bricks::Common::Rclone';
+requires 'Bio_Bricks::Common::Setup';
+requires 'Bio_Bricks::LakeFS';
+requires 'Bio_Bricks::LakeFS::Lakectl';
+requires 'Bio_Bricks::LakeFS::Rclone';
+requires 'Bio_Bricks::LakeFS::Repo';
+requires 'Bio_Bricks::Store::Neptune';
+requires 'Bio_Bricks::Store::Neptune::BulkLoader';
+requires 'Bio_Bricks::Store::Neptune::LoadJob';
+requires 'Bio_Bricks::Store::Neptune::LoaderCache';
+requires 'Bio_Bricks::Store::Neptune::State';
+
+requires 'Carp';
+requires 'Data::Printer';
+requires 'failures';
+requires 'FindBin';
+requires 'Getopt::Long';
+requires 'Getopt::Long::Descriptive';
+requires 'IPC::Run';
+requires 'JSON::PP';
+requires 'Log::Any';
+requires 'Log::Any::Adapter';
+requires 'MIME::Base64';
+requires 'MooX::Struct';
+requires 'Number::Bytes::Human';
+requires 'Object::Util';
+requires 'Path::Tiny';
+requires 'Pod::Usage';
+requires 'Term::ANSIColor';
+requires 'Text::CSV';
