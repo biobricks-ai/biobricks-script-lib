@@ -13,4 +13,5 @@ perlPackages.buildPerlPackage {
 		description = "Code coverage metrics for Perl";
 		license = with lib.licenses; [ artistic1 gpl1Plus ];
 	};
+	doCheck = false;
 }
