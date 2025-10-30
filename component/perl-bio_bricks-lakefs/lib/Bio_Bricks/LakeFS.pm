@@ -5,14 +5,16 @@ use Bio_Bricks::Common::Setup;
 use HTTP::Tiny;
 use MIME::Base64;
 use Bio_Bricks::LakeFS::Auth;
+use URI;
 
 lazy auth => sub {
 	Bio_Bricks::LakeFS::Auth->new;
 }, isa => InstanceOf['Bio_Bricks::LakeFS::Auth'];
 
 lazy _endpoint => method () {
-	$self->auth->get_endpoint || croak "LakeFS endpoint not found in environment or config";
-}, isa => Maybe[Str];
+	my $endpoint_str = $self->auth->get_endpoint || croak "LakeFS endpoint not found in environment or config";
+	return URI->new($endpoint_str);
+}, isa => InstanceOf['URI'];
 
 lazy _access_key_id => method () {
 	$self->auth->get_access_key_id || croak "LakeFS access key ID not found in environment or config";
@@ -41,16 +43,34 @@ lazy json => sub {
 	JSON::PP->new->utf8->pretty;
 };
 
-method _request ($method, $path, $data = undef) {
+method _build_uri ($path_segments, $params = undef) {
+	my $uri = $self->_endpoint->clone;
 
-	my $url = $self->_endpoint . '/api/v1' . $path;
+	# Build path from segments
+	my @segments = ('api', 'v1', ref($path_segments) eq 'ARRAY' ? @$path_segments : $path_segments);
+	$uri->path_segments(@segments);
+
+	if ($params && %$params) {
+		# Filter out undefined values
+		my %query_params = map { $_ => $params->{$_} }
+		                   grep { defined $params->{$_} }
+		                   keys %$params;
+		$uri->query_form(%query_params) if %query_params;
+	}
+
+	return $uri;
+}
+
+method _request ($method, $path_segments, $data = undef, $query_params = undef) {
+
+	my $uri = $self->_build_uri($path_segments, $query_params);
 
 	my %options;
 	if ($data && ($method eq 'POST' || $method eq 'PUT' || $method eq 'PATCH')) {
 		$options{content} = $self->json->encode($data);
 	}
 
-	my $response = $self->http->request($method, $url, \%options);
+	my $response = $self->http->request($method, $uri->as_string, \%options);
 
 	unless ($response->{success}) {
 		my $error = $response->{content} || $response->{reason};
@@ -65,23 +85,17 @@ method _request ($method, $path, $data = undef) {
 }
 
 # Repository operations
-method list_repositories ($params = undef) {
-	$params ||= {};
-	my $query = '';
-	if ($params->{after}) {
-		$query = "?after=$params->{after}";
-	}
-	if ($params->{amount}) {
-		$query .= $query ? '&' : '?';
-		$query .= "amount=$params->{amount}";
-	}
-
-	return $self->_request('GET', "/repositories$query");
+use kura PaginationParams => Dict[
+	after => Optional[Str],
+	amount => Optional[Int],
+];
+method list_repositories (PaginationParams :$params = {}) {
+	return $self->_request('GET', [qw(repositories)], undef, $params);
 }
 
 method get_repository ($repository) {
 	croak "Repository name required" unless $repository;
-	return $self->_request('GET', "/repositories/$repository");
+	return $self->_request('GET', [qw(repositories), $repository]);
 }
 
 method create_repository ($repository, $storage_namespace, $default_branch = undef) {
@@ -90,7 +104,7 @@ method create_repository ($repository, $storage_namespace, $default_branch = und
 
 	$default_branch ||= 'main';
 
-	return $self->_request('POST', '/repositories', {
+	return $self->_request('POST', [qw(repositories)], {
 		name => $repository,
 		storage_namespace => $storage_namespace,
 		default_branch => $default_branch,
@@ -99,31 +113,25 @@ method create_repository ($repository, $storage_namespace, $default_branch = und
 
 method delete_repository ($repository) {
 	croak "Repository name required" unless $repository;
-	return $self->_request('DELETE', "/repositories/$repository");
+	return $self->_request('DELETE', [qw(repositories), $repository]);
 }
 
 # Branch operations
-method list_branches ($repository, $params = undef) {
+use kura BranchPaginationParams => Dict[
+	after => Optional[Str],
+	amount => Optional[Int],
+];
+method list_branches ($repository, BranchPaginationParams :$params = {}) {
 	croak "Repository name required" unless $repository;
 
-	$params ||= {};
-	my $query = '';
-	if ($params->{after}) {
-		$query = "?after=$params->{after}";
-	}
-	if ($params->{amount}) {
-		$query .= $query ? '&' : '?';
-		$query .= "amount=$params->{amount}";
-	}
-
-	return $self->_request('GET', "/repositories/$repository/branches$query");
+	return $self->_request('GET', [qw(repositories), $repository, qw(branches)], undef, $params);
 }
 
 method get_branch ($repository, $branch) {
 	croak "Repository name required" unless $repository;
 	croak "Branch name required" unless $branch;
 
-	return $self->_request('GET', "/repositories/$repository/branches/$branch");
+	return $self->_request('GET', [qw(repositories), $repository, qw(branches), $branch]);
 }
 
 method create_branch ($repository, $branch, $source) {
@@ -131,7 +139,7 @@ method create_branch ($repository, $branch, $source) {
 	croak "Branch name required" unless $branch;
 	croak "Source reference required" unless $source;
 
-	return $self->_request('POST', "/repositories/$repository/branches", {
+	return $self->_request('POST', [qw(repositories), $repository, qw(branches)], {
 		name => $branch,
 		source => $source,
 	});
@@ -141,34 +149,21 @@ method delete_branch ($repository, $branch) {
 	croak "Repository name required" unless $repository;
 	croak "Branch name required" unless $branch;
 
-	return $self->_request('DELETE', "/repositories/$repository/branches/$branch");
+	return $self->_request('DELETE', [qw(repositories), $repository, qw(branches), $branch]);
 }
 
 # Object operations
-method list_objects ($repository, $ref, $params = undef) {
+use kura ListObjectsParams => Dict[
+	prefix => Optional[Str],
+	after => Optional[Str],
+	amount => Optional[Int],
+	delimiter => Optional[Str],
+];
+method list_objects ($repository, $ref, ListObjectsParams :$params = {}) {
 	croak "Repository name required" unless $repository;
 	croak "Reference required" unless $ref;
 
-	$params ||= {};
-	my $query = "?";
-
-	if ($params->{prefix}) {
-		$query .= "prefix=$params->{prefix}&";
-	}
-	if ($params->{after}) {
-		$query .= "after=$params->{after}&";
-	}
-	if ($params->{amount}) {
-		$query .= "amount=$params->{amount}&";
-	}
-	if ($params->{delimiter}) {
-		$query .= "delimiter=$params->{delimiter}&";
-	}
-
-	$query =~ s/&$//;  # Remove trailing &
-	$query = '' if $query eq '?';  # Remove empty query
-
-	return $self->_request('GET', "/repositories/$repository/refs/$ref/objects$query");
+	return $self->_request('GET', [qw(repositories), $repository, qw(refs), $ref, qw(objects)], undef, $params);
 }
 
 method get_object ($repository, $ref, $path) {
@@ -176,10 +171,7 @@ method get_object ($repository, $ref, $path) {
 	croak "Reference required" unless $ref;
 	croak "Path required" unless $path;
 
-	# URL encode the path
-	$path =~ s/([^A-Za-z0-9\-_.~\/])/sprintf("%%%02X", ord($1))/eg;
-
-	return $self->_request('GET', "/repositories/$repository/refs/$ref/objects?path=$path");
+	return $self->_request('GET', [qw(repositories), $repository, qw(refs), $ref, qw(objects)], undef, { path => $path });
 }
 
 method upload_object ($repository, $branch, $path, $content) {
@@ -188,13 +180,10 @@ method upload_object ($repository, $branch, $path, $content) {
 	croak "Path required" unless $path;
 	croak "Content required" unless defined $content;
 
-	# URL encode the path
-	$path =~ s/([^A-Za-z0-9\-_.~\/])/sprintf("%%%02X", ord($1))/eg;
-
-	my $url = $self->_endpoint . "/api/v1/repositories/$repository/branches/$branch/objects?path=$path";
+	my $uri = $self->_build_uri([qw(repositories), $repository, qw(branches), $branch, qw(objects)], { path => $path });
 
 	# For file upload, we need to send raw content with proper content-type
-	my $response = $self->http->request('PUT', $url, {
+	my $response = $self->http->request('PUT', $uri->as_string, {
 		content => $content,
 		headers => {
 			'Authorization' => $self->http->default_headers->{'Authorization'},
@@ -215,10 +204,7 @@ method delete_object ($repository, $branch, $path) {
 	croak "Branch name required" unless $branch;
 	croak "Path required" unless $path;
 
-	# URL encode the path
-	$path =~ s/([^A-Za-z0-9\-_.~\/])/sprintf("%%%02X", ord($1))/eg;
-
-	return $self->_request('DELETE', "/repositories/$repository/branches/$branch/objects?path=$path");
+	return $self->_request('DELETE', [qw(repositories), $repository, qw(branches), $branch, qw(objects)], undef, { path => $path });
 }
 
 # Commit operations
@@ -235,31 +221,25 @@ method commit ($repository, $branch, $message, $metadata = undef) {
 		$data->{metadata} = $metadata;
 	}
 
-	return $self->_request('POST', "/repositories/$repository/branches/$branch/commits", $data);
+	return $self->_request('POST', [qw(repositories), $repository, qw(branches), $branch, qw(commits)], $data);
 }
 
-method list_commits ($repository, $ref, $params = undef) {
+use kura CommitPaginationParams => Dict[
+	after => Optional[Str],
+	amount => Optional[Int],
+];
+method list_commits ($repository, $ref, CommitPaginationParams :$params = {}) {
 	croak "Repository name required" unless $repository;
 	croak "Reference required" unless $ref;
 
-	$params ||= {};
-	my $query = '';
-	if ($params->{after}) {
-		$query = "?after=$params->{after}";
-	}
-	if ($params->{amount}) {
-		$query .= $query ? '&' : '?';
-		$query .= "amount=$params->{amount}";
-	}
-
-	return $self->_request('GET', "/repositories/$repository/refs/$ref/commits$query");
+	return $self->_request('GET', [qw(repositories), $repository, qw(refs), $ref, qw(commits)], undef, $params);
 }
 
 method get_commit ($repository, $commit_id) {
 	croak "Repository name required" unless $repository;
 	croak "Commit ID required" unless $commit_id;
 
-	return $self->_request('GET', "/repositories/$repository/commits/$commit_id");
+	return $self->_request('GET', [qw(repositories), $repository, qw(commits), $commit_id]);
 }
 
 # Merge operations
@@ -276,34 +256,22 @@ method merge ($repository, $source_ref, $destination_branch, $message = undef) {
 		$data->{message} = $message;
 	}
 
-	return $self->_request('POST', "/repositories/$repository/branches/$destination_branch/merge", $data);
+	return $self->_request('POST', [qw(repositories), $repository, qw(branches), $destination_branch, qw(merge)], $data);
 }
 
 # Diff operations
-method diff ($repository, $left_ref, $right_ref, $params = undef) {
+use kura DiffParams => Dict[
+	after => Optional[Str],
+	amount => Optional[Int],
+	prefix => Optional[Str],
+	delimiter => Optional[Str],
+];
+method diff ($repository, $left_ref, $right_ref, DiffParams :$params = {}) {
 	croak "Repository name required" unless $repository;
 	croak "Left reference required" unless $left_ref;
 	croak "Right reference required" unless $right_ref;
 
-	$params ||= {};
-	my $query = '';
-	if ($params->{after}) {
-		$query = "?after=$params->{after}";
-	}
-	if ($params->{amount}) {
-		$query .= $query ? '&' : '?';
-		$query .= "amount=$params->{amount}";
-	}
-	if ($params->{prefix}) {
-		$query .= $query ? '&' : '?';
-		$query .= "prefix=$params->{prefix}";
-	}
-	if ($params->{delimiter}) {
-		$query .= $query ? '&' : '?';
-		$query .= "delimiter=$params->{delimiter}";
-	}
-
-	return $self->_request('GET', "/repositories/$repository/refs/$left_ref/diff/$right_ref$query");
+	return $self->_request('GET', [qw(repositories), $repository, qw(refs), $left_ref, qw(diff), $right_ref], undef, $params);
 }
 
 1;
