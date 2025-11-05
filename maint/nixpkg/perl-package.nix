@@ -42,6 +42,7 @@ let
     ModuleMask              = "module-mask";
     ModulePluggable         = "module-pluggable";
     MooseXClassAttribute    = "moosex-classattribute";
+    MooseXGetopt            = "moosex-getopt";
     MooXLogAny              = "moox-log-any";
     MooXShortHas            = "moox-shorthas";
     MooXStruct              = "moox-struct";
