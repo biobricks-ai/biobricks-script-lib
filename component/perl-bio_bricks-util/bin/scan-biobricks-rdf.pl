@@ -11,6 +11,7 @@ use Bio_Bricks::Common::DVC::Iterator;
 use Bio_Bricks::Common::DVC::Storage::S3;
 use Bio_Bricks::Common::Config;
 use Bio_Bricks::Common::AWS::Paws;
+use Bio_Bricks::Common::Output qw(:basic);
 use MIME::Base64;
 use Text::CSV;
 use Log::Any::Adapter ('Screen');
@@ -75,10 +76,13 @@ fun main() {
 	$log->info("Found " . scalar(@repos) . " repositories in $org");
 
 	# Process each repository
+	my $repo_count = 0;
+	my $total_repos = scalar(@repos);
 	for my $repo (@repos) {
+		$repo_count++;
 		my $repo_name = $repo->{name};
 		my $repo_type = $repo->{visibility} // ($repo->{private} ? 'private' : 'public');
-		$log->info("Processing repository: $repo_name ($repo_type)");
+		output_info("[$repo_count/$total_repos] Processing brick: $repo_name ($repo_type)");
 
 		try {
 			process_repository($pithub, $dvc_storage, $csv, $fh, $org, $repo_name, $repo_type);
@@ -88,7 +92,7 @@ fun main() {
 	}
 
 	close $fh;
-	say "RDF scan complete. Results written to $output_file";
+	output_success("RDF scan complete. Results written to $output_file");
 }
 
 fun process_repository($pithub, $dvc_storage, $csv, $fh, $org, $repo_name, $repo_type) {
@@ -150,7 +154,8 @@ fun process_output($dvc_storage, $csv, $fh, $repo_name, $repo_type, $stage_name,
 	# Process all files in the output
 	while (my $item = $iterator->()) {
 		if ($item->is_err()) {
-			$log->debug("Iterator error in $repo_name/$stage_name: " . $item->unwrap_err());
+			my $err = $item->unwrap_err();
+			$log->warn("Could not fetch item from brick '$repo_name' stage '$stage_name': $err");
 			next;
 		}
 
