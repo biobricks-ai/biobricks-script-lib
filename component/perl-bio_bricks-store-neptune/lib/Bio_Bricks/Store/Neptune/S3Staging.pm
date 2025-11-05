@@ -5,6 +5,7 @@ use Bio_Bricks::Common::Setup;
 use Types::Common::String qw(NonEmptyStr);
 use MooX::Log::Any;
 use URI::s3;
+use Bio_Bricks::Common::AWS::S3;
 
 with qw(MooX::Log::Any);
 
@@ -39,9 +40,10 @@ systems like DVC use hash-based URIs that don't preserve extensions.
 
 This class:
 - Detects when a file needs staging (compressed file without proper extension)
-- Copies files to a staging bucket preserving the path structure + extension
+- Checks if staged file already exists and matches source (ETag + size)
+- Copies files to staging bucket only if needed, preserving path structure + extension
 - Submits loads using the staged URI
-- Tracks staged files to avoid duplicate copies
+- Tracks staged files in-memory to avoid duplicate checks
 
 Example staging transformation (with staging_s3_prefix='s3://my-bucket/neptune-staging'):
   Source: s3://dvc-bucket/files/md5/e7/c81c75253235cd9ca39a0192c0b58f
@@ -73,6 +75,11 @@ ro aws_profile => (
 # Track staged files to avoid duplicate copies
 lazy staged_files => sub {
 	{};
+};
+
+# S3 client for checking object attributes
+lazy s3_client => method() {
+	return Bio_Bricks::Common::AWS::S3->new;
 };
 
 =head1 METHODS
@@ -172,6 +179,9 @@ Copy a file to the staging bucket with proper extension.
 		file_path  => 'mesh.nt.gz',
 	);
 
+Before copying, checks if the staged file already exists using GetObjectAttributes
+to compare ETag and size. If both match, skips the copy operation.
+
 Returns the staged S3 URI.
 
 =cut
@@ -192,6 +202,22 @@ method stage_file(Str :$source_uri, Str :$file_path) {
 		source_uri => $source_uri,
 		file_path  => $file_path,
 	);
+
+	# Check if staged file already exists and matches source
+	my $needs_copy = $self->_needs_copy(
+		source_uri => $source_uri,
+		staged_uri => $staged_uri,
+	);
+
+	if (!$needs_copy) {
+		$self->log->info("Staged file already exists and matches source", {
+			source => $source_uri,
+			staged => $staged_uri,
+		});
+		# Cache the staged URI
+		$self->staged_files->{$cache_key} = $staged_uri;
+		return $staged_uri;
+	}
 
 	$self->log->info("Staging file to S3", {
 		source => $source_uri,
@@ -216,6 +242,90 @@ method stage_file(Str :$source_uri, Str :$file_path) {
 	$self->staged_files->{$cache_key} = $staged_uri;
 
 	return $staged_uri;
+}
+
+=method _needs_copy
+
+Internal method to check if a file needs to be copied to staging.
+Returns true if copy is needed, false if staged file already exists and matches source.
+
+Compares both ETag and size between source and staged files.
+
+=cut
+
+method _needs_copy(Str :$source_uri, Str :$staged_uri) {
+	my $source = URI::s3->new($source_uri);
+	my $staged = URI::s3->new($staged_uri);
+
+	# Get source object attributes
+	my $source_attrs = do {
+		try {
+			$self->s3_client->get_object_attributes(
+				Bucket => $source->bucket,
+				Key => $source->key,
+				ObjectAttributes => ['ETag', 'ObjectSize'],
+			);
+		} catch ($e) {
+			$self->log->warn("Failed to get source object attributes", {
+				source_uri => $source_uri,
+				error => $e,
+			});
+			return 1;  # Assume copy needed if can't check source
+		}
+	};
+
+	return 1 unless $source_attrs;  # Source doesn't exist? Should not happen
+
+	# Get staged object attributes
+	my $staged_attrs = do {
+		try {
+			$self->s3_client->get_object_attributes(
+				Bucket => $staged->bucket,
+				Key => $staged->key,
+				ObjectAttributes => ['ETag', 'ObjectSize'],
+			);
+		} catch ($e) {
+			# Staged file doesn't exist or error checking it
+			if ($e =~ /NoSuchKey/i || $e =~ /404/i) {
+				$self->log->debug("Staged file does not exist", { staged_uri => $staged_uri });
+				return 1;  # Need to copy
+			}
+			$self->log->warn("Error checking staged object attributes", {
+				staged_uri => $staged_uri,
+				error => $e,
+			});
+			return 1;  # Assume copy needed on error
+		}
+	};
+
+	return 1 unless $staged_attrs;  # Staged file doesn't exist
+
+	# Compare ETag and size
+	my $source_etag = $source_attrs->ETag;
+	my $staged_etag = $staged_attrs->ETag;
+	my $source_size = $source_attrs->ObjectSize;
+	my $staged_size = $staged_attrs->ObjectSize;
+
+	# Strip quotes from ETags if present
+	$source_etag =~ s/^"(.*)"$/$1/ if $source_etag;
+	$staged_etag =~ s/^"(.*)"$/$1/ if $staged_etag;
+
+	my $etag_match = $source_etag && $staged_etag && $source_etag eq $staged_etag;
+	my $size_match = defined($source_size) && defined($staged_size) && $source_size == $staged_size;
+
+	$self->log->debug("Comparing source and staged files", {
+		source_uri => $source_uri,
+		staged_uri => $staged_uri,
+		source_etag => $source_etag,
+		staged_etag => $staged_etag,
+		source_size => $source_size,
+		staged_size => $staged_size,
+		etag_match => $etag_match,
+		size_match => $size_match,
+	});
+
+	# Both ETag and size must match to skip copy
+	return !($etag_match && $size_match);
 }
 
 =method load_file
