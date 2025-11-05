@@ -1,6 +1,7 @@
 package Bio_Bricks::Common::DVC::Storage::S3;
 
 use Bio_Bricks::Common::Setup;
+use Bio_Bricks::Common::DVC::Error;
 use URI::s3;
 use Bio_Bricks::Common::AWS::Paws;
 use Bio_Bricks::Common::DVC::DirectoryParser;
@@ -78,8 +79,16 @@ method fetch_directory ($dir_output) {
 			$self->log->warnf("Empty body returned for directory: %s", $dir_output->path);
 		}
 	} catch ($e) {
-		$self->log->errorf("S3 error fetching directory %s: %s", $dir_output->path, $e);
-		die "S3 error fetching directory " . $dir_output->path . ": $e";
+		Bio_Bricks::Common::DVC::Error::storage::fetch->throw({
+			msg => "Storage error fetching directory " . $dir_output->path,
+			payload => {
+				backend => 'S3',
+				bucket => $dir_uri->bucket,
+				key => $dir_uri->key,
+				path => $dir_output->path,
+				error => $e,
+			}
+		});
 	}
 
 	return $directory;
