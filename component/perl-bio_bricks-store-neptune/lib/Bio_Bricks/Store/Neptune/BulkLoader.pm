@@ -107,24 +107,18 @@ Detect RDF format from file path.
 
 =cut
 
-method detect_format(Str $path) {
-	return 'unsupported' unless defined $path;
+method detect_format((NonEmptyStr) $path) {
+	# Supported compression
+	my $compression_re = qr/\.(?:gz|bz2)/;
 
-	# Remove compression extensions
-	my $filename = $path;
-	$filename =~ s/\.(gz|bz2|xz|zip)$//i;
+	# Map file extensions to Neptune-supported RDF formats
+	return 'ntriples' if $path =~ m{ \.    nt           (?:$compression_re)? $ }ix;
+	return 'nquads'   if $path =~ m{ \.    nq           (?:$compression_re)? $ }ix;
+	return 'turtle'   if $path =~ m{ \.    ttl          (?:$compression_re)? $ }ix;
+	return 'rdfxml'   if $path =~ m{ \. (?:rdf|xml|owl) (?:$compression_re)? $ }ix;
 
-	# Map file extensions to Neptune-supported formats
-	return 'ntriples' if $filename =~ /\.n?t$/i;
-	return 'nquads'   if $filename =~ /\.nq$/i;
-	return 'turtle'   if $filename =~ /\.ttl$/i;
-	return 'rdfxml'   if $filename =~ /\.(rdf|xml|owl)$/i;
-
-	# HDT files are not supported
-	return 'unsupported' if $filename =~ /\.hdt$/i;
-
-	# Default to ntriples
-	return 'ntriples';
+	# Default to unsupported
+	return 'unsupported';
 }
 
 =method validate_format

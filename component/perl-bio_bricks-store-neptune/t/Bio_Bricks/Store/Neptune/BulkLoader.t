@@ -41,7 +41,7 @@ subtest 'Format detection from file path' => sub {
 	is $loader->detect_format('data/file.rdf'), 'rdfxml', 'Detects RDF/XML';
 	is $loader->detect_format('data/file.nq'), 'nquads', 'Detects N-Quads';
 	is $loader->detect_format('data/file.hdt'), 'unsupported', 'HDT is unsupported';
-	is $loader->detect_format('data/file.txt'), 'ntriples', 'Defaults to N-Triples';
+	is $loader->detect_format('data/file.txt'), 'unsupported', 'Defaults to unsupported';
 };
 
 subtest 'Format detection ignores compression' => sub {
@@ -53,7 +53,7 @@ subtest 'Format detection ignores compression' => sub {
 
 	is $loader->detect_format('data/file.nt.gz'), 'ntriples', 'Detects through .gz';
 	is $loader->detect_format('data/file.ttl.bz2'), 'turtle', 'Detects through .bz2';
-	is $loader->detect_format('data/file.rdf.xz'), 'rdfxml', 'Detects through .xz';
+	is $loader->detect_format('data/file.rdf.xz'), 'unsupported', 'Compression type .xz is unsupported';
 };
 
 subtest 'Build load request structure' => sub {
