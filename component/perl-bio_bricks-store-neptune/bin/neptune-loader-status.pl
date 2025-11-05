@@ -132,7 +132,7 @@ fun output_table($jobs) {
 		];
 	}
 
-	print generate_table(rows => \@rows, header_row => 1, style => $is_utf8 ? 'boxrule' : 'classic');
+	say generate_table(rows => \@rows, header_row => 1, style => $is_utf8 ? 'boxrule' : 'classic');
 }
 
 fun output_tsv($jobs) {
