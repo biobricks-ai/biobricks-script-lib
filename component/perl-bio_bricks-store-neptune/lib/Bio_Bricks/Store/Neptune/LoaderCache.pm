@@ -2,14 +2,9 @@ package Bio_Bricks::Store::Neptune::LoaderCache;
 # ABSTRACT: CHI-based caching for Neptune loader job details
 
 use Bio_Bricks::Common::Setup;
-use Types::Standard qw(InstanceOf Int Str HashRef Maybe);
 use Types::Path::Tiny qw(Path);
-use Path::Tiny;
 use File::HomeDir;
 use CHI;
-
-use Mu;
-use MooX::Log::Any;
 
 with qw(MooX::Log::Any);
 
