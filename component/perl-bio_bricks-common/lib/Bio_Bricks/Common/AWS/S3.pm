@@ -3,6 +3,8 @@ package Bio_Bricks::Common::AWS::S3;
 
 use Bio_Bricks::Common::Setup;
 use Bio_Bricks::Common::AWS::Paws;
+use Bio_Bricks::Common::AWS::Paws::S3::GetObjectAttributes;
+use Bio_Bricks::Common::AWS::Paws::S3::GetObjectAttributesOutput;
 
 ro paws => isa => InstanceOf['Bio_Bricks::Common::AWS::Paws'], default => sub { Bio_Bricks::Common::AWS::Paws->new };
 ro bucket => isa => Maybe[Str];
@@ -62,6 +64,21 @@ method download_object (%args) {
 	}
 
 	return 0;
+}
+
+method get_object_attributes (%args) {
+	# Use default bucket if not specified
+	$args{Bucket} //= $self->bucket if $self->bucket;
+
+	# GetObjectAttributes requires ObjectAttributes parameter
+	$args{ObjectAttributes} //= ['ETag', 'ObjectSize'];
+
+	# Call through Paws low-level API since GetObjectAttributes isn't in Paws yet
+	my $call_object = $self->_s3->new_with_coercions(
+		'Bio_Bricks::Common::AWS::Paws::S3::GetObjectAttributes',
+		%args
+	);
+	return $self->_s3->caller->do_call($self->_s3, $call_object);
 }
 
 1;
