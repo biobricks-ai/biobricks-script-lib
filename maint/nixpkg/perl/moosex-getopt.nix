@@ -7,7 +7,7 @@ perlPackages.buildPerlModule {
 		url = "mirror://cpan/authors/id/E/ET/ETHER/MooseX-Getopt-0.78.tar.gz";
 		hash = "sha256-euiWIPOIJ9utIxOk5fc0BJlY9dYhK9Yqvby4rpNty8c=";
 	};
-	buildInputs = with perlPackages; [ ModuleBuildTiny ModuleRuntime PathTiny TestDeep TestFatal TestNeeds TestTrap TestWarnings ];
+	buildInputs = with perlPackages; [ ModuleBuildTiny ModuleRuntime PathTiny TestDeep TestFatal TestNeeds TestSimple13 TestTrap TestWarnings ];
 	propagatedBuildInputs = with perlPackages; [ GetoptLongDescriptive Moose MooseXRoleParameterized TryTiny namespaceautoclean ];
 	meta = {
 		homepage = "https://github.com/moose/MooseX-Getopt";
