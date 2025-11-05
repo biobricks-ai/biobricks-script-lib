@@ -40,11 +40,10 @@
         # Development mode flag
         isDevelopment = true;
 
-        # Get perl-bio_bricks-common modules
-        commonPerlModules = perl-bio_bricks-common.packages.${system}.perlModules;
-
-        # Get perl-bio_bricks-store-neptune modules
-        neptuneModules = perl-bio_bricks-store-neptune.packages.${system}.perlModules;
+        # Depend on other components. Need to rebuild if these are changed
+        # during development.
+        commonModule = perl-bio_bricks-common.packages.${system}.default;
+        neptuneModule = perl-bio_bricks-store-neptune.packages.${system}.default;
 
         # Runtime dependencies (from script inspection)
         runtimeDeps = with pkgs.perlPackages; [
@@ -74,7 +73,10 @@
 
         # Perl dependencies for Bio_Bricks::Util
         bioBricksUtil = {
-          perlModules = ps: (commonPerlModules ps) ++ (neptuneModules ps) ++ runtimeDeps ++ testDeps ++ pkgs.lib.optionals isDevelopment devDeps;
+          perlModules = ps: [
+            commonModule
+            neptuneModule
+          ] ++ runtimeDeps ++ testDeps ++ pkgs.lib.optionals isDevelopment devDeps;
         };
 
         # Perl environment with all dependencies
