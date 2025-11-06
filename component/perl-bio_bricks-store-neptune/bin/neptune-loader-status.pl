@@ -33,6 +33,7 @@ my %opts = (
 	load_id => [],     # Specific load IDs to check (empty = all)
 	limit => 0,        # Limit number of jobs to fetch (0 = all)
 	format => 'table', # table, json, or tsv
+	errors => 0,       # Fetch detailed error information
 	help => 0,
 );
 
@@ -46,10 +47,17 @@ GetOptions(
 	'json|j'               => sub { $opts{format} = 'json' },
 	'tsv'                  => sub { $opts{format} = 'tsv' },
 	'table'                => sub { $opts{format} = 'table' },
+	'errors'               => \$opts{errors},
 	'help|h'               => \$opts{help},
 ) or pod2usage(2);
 
 pod2usage(1) if $opts{help};
+
+# Validate options
+if ($opts{errors} && $opts{format} ne 'json') {
+	warn "Warning: --errors flag requires JSON output format, switching to JSON\n";
+	$opts{format} = 'json';
+}
 
 # Create Neptune client
 my $neptune = Bio_Bricks::Store::Neptune->new(
@@ -81,13 +89,25 @@ if ($opts{limit} > 0 && @load_ids_to_check > $opts{limit}) {
 }
 
 # Fetch detailed status for each load (uses cache for completed/failed jobs)
+# Structure: ArrayRef[Map[loadId => Str, status => HashRef]]
 my @jobs;
 for my $load_id (@load_ids_to_check) {
-	my $status = $loader_cache->get_job_status($load_id);
-	my $job = $status->{payload}{overallStatus};
-	if ($job) {
-		$job->{load_id} = $load_id;
-		push @jobs, $job;
+	# Fetch with error details if requested (cannot use cache for this)
+	my $params = {};
+	if ($opts{errors}) {
+		$params->{errors} = 1;
+		$params->{details} = 1;
+		$params->{errorsPerPage} = 100;  # Get up to 100 errors per job
+	}
+
+	my $status = $loader_cache->get_job_status($load_id, $params);
+
+	if ($status) {
+		# Store without modifying API response structure
+		push @jobs, {
+			loadId => $load_id,
+			status => $status->{payload},
+		};
 	}
 }
 
@@ -107,7 +127,12 @@ fun output_table($jobs) {
 
 	my @rows = (['LOAD_ID', 'STATUS', 'RECORDS', 'ERRORS', 'DUPES', 'TIME(s)', 'STARTED', 'SOURCE']);
 
-	for my $job (@$jobs) {
+	for my $job_entry (@$jobs) {
+		my $load_id = $job_entry->{loadId};
+		my $payload = $job_entry->{status};
+		my $job = $payload->{overallStatus};
+		next unless $job;
+
 		my $errors = ($job->{parsingErrors} // 0) + ($job->{insertErrors} // 0);
 		my $source = $job->{fullUri} // 'N/A';
 		# Truncate long S3 URIs for table display
@@ -121,7 +146,7 @@ fun output_table($jobs) {
 		}
 
 		push @rows, [
-			$job->{load_id},
+			$load_id,
 			$job->{status} // 'UNKNOWN',
 			$job->{totalRecords} // 0,
 			$errors,
@@ -141,9 +166,14 @@ fun output_tsv($jobs) {
 
 	print join("\t", 'LOAD_ID', 'STATUS', 'TOTAL_RECORDS', 'PARSING_ERRORS', 'INSERT_ERRORS', 'DUPLICATES', 'TIME_SPENT', 'SOURCE') . "\n";
 
-	for my $job (@$jobs) {
+	for my $job_entry (@$jobs) {
+		my $load_id = $job_entry->{loadId};
+		my $payload = $job_entry->{status};
+		my $job = $payload->{overallStatus};
+		next unless $job;
+
 		print join("\t",
-			$job->{load_id},
+			$load_id,
 			$job->{status} // 'UNKNOWN',
 			$job->{totalRecords} // 0,
 			$job->{parsingErrors} // 0,
@@ -176,6 +206,7 @@ neptune-loader-status.pl [options]
    -j, --json                   Output as JSON (shortcut for --format json)
 	   --tsv                    Output as TSV (shortcut for --format tsv)
 	   --table                  Output as table (default)
+	   --errors                 Fetch detailed error information (requires JSON output)
    -h, --help                   Show this help message
 
 =head1 DESCRIPTION
@@ -203,6 +234,12 @@ You can filter to specific job IDs or limit the number of jobs fetched.
 
   # JSON output for all jobs
   neptune-loader-status.pl --json
+
+  # Fetch detailed error information for failed jobs (JSON only)
+  neptune-loader-status.pl --load-id ef5f3a23-ffe8-4d0a-83c7-e0f6aebc88cb --errors
+
+  # Get errors for all recent jobs
+  neptune-loader-status.pl --json --errors
 
   # TSV output for scripting
   neptune-loader-status.pl --tsv
@@ -242,6 +279,24 @@ Specific job status (with --load-id):
 	  "startTime": "2025-10-15T23:54:12.000Z"
 	}
   }
+}
+
+Job status with errors (--load-id --errors):
+{
+  "overallStatus": {
+	"load_id": "abc123",
+	"status": "LOAD_FAILED",
+	"totalRecords": 1000,
+	"parsingErrors": 5,
+	"insertErrors": 2
+  },
+  "errors": [
+	{
+	  "errorCode": "PARSING_ERROR",
+	  "errorMessage": "Invalid RDF syntax on line 42",
+	  "fileName": "data.nt.gz"
+	}
+  ]
 }
 
 =cut
