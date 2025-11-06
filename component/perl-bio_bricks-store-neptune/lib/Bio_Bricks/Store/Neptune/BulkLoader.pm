@@ -83,8 +83,18 @@ ro queue_request => (
 	default => 0,
 );
 
+# Load mode: AUTO, NEW, or RESUME
+# RESUME mode will skip files that were successfully loaded in a previous attempt
+ro mode => (
+	isa => Str,
+	default => 'AUTO',
+);
+
 # Valid parallelism levels
 my %VALID_PARALLELISM = map { $_ => 1 } qw(LOW MEDIUM HIGH OVERSUBSCRIBE);
+
+# Valid load modes
+my %VALID_MODES = map { $_ => 1 } qw(AUTO NEW RESUME);
 
 # Valid RDF formats for Neptune
 my %VALID_FORMATS = map { $_ => 1 } qw(ntriples nquads turtle rdfxml);
@@ -94,6 +104,12 @@ method BUILD() {
 	unless ($VALID_PARALLELISM{$self->parallelism}) {
 		croak "Invalid parallelism: " . $self->parallelism .
 			  ". Must be one of: " . join(', ', keys %VALID_PARALLELISM);
+	}
+
+	# Validate mode
+	unless ($VALID_MODES{$self->mode}) {
+		croak "Invalid mode: " . $self->mode .
+			  ". Must be one of: " . join(', ', keys %VALID_MODES);
 	}
 }
 
@@ -154,6 +170,7 @@ method build_load_request(Str :$source_uri, Str :$format, Maybe[Str] :$graph_uri
 		failOnError => $self->fail_on_error ? 'TRUE' : 'FALSE',
 		parallelism => $self->parallelism,
 		queueRequest => $self->queue_request ? 'TRUE' : 'FALSE',
+		mode => $self->mode,
 	};
 
 	# Add single cardinality update if enabled
