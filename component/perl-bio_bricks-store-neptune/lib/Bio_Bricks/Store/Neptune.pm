@@ -7,6 +7,13 @@ use URI;
 use Bio_Bricks::Common::Config;
 use MooX::Log::Any;
 use IO::Socket::SSL qw(SSL_VERIFY_NONE);
+use Types::Standard qw(Enum);
+use Types::Common::Numeric qw(PositiveInt);
+
+# Define types for Neptune API parameters with coercion
+use kura NeptuneBoolParam => (Enum[qw(true false)])->plus_coercions(
+	Bool, sub { $_ ? 'true' : 'false' },
+);
 
 with qw(MooX::Log::Any);
 
@@ -155,11 +162,55 @@ Get the status of the bulk loader or a specific load job.
 
 	my $status = $neptune->get_loader_status();        # Overall status
 	my $status = $neptune->get_loader_status($load_id); # Specific job
+	my $status = $neptune->get_loader_status($load_id, {
+		details => 1,
+		errors => 1,
+		errorsPerPage => 100,
+	});
+
+Optional parameters:
+- details: Include extended information (boolean)
+- errors: Include list of errors (boolean)
+- page: Error result page number (integer)
+- errorsPerPage: Number of errors per page (integer, default 10)
 
 =cut
 
-method get_loader_status(Maybe[Str] $load_id = undef) {
+method get_loader_status(Maybe[Str] $load_id = undef, Maybe[HashRef] $params = undef) {
 	my $url = $self->loader_url($load_id);
+
+	# Add additional query parameters if provided
+	if ($params && %$params) {
+		my $uri = URI->new($url);
+		my %existing_params = $uri->query_form;
+
+		# Define parameter types for Neptune loader API
+		my %param_types = (
+			details       => NeptuneBoolParam,
+			errors        => NeptuneBoolParam,
+			page          => PositiveInt,
+			errorsPerPage => PositiveInt,
+		);
+
+		# Filter out undefined values and coerce to appropriate types
+		my %query_params;
+		for my $key (keys %$params) {
+			next unless defined $params->{$key};
+			my $value = $params->{$key};
+
+			# Apply type coercion if parameter has a defined type
+			if (exists $param_types{$key} && $param_types{$key}->has_coercion) {
+				my $type = $param_types{$key};
+				$query_params{$key} = $type->coerce($value);
+			} else {
+				# Pass through unknown parameters as-is (integers, strings, etc.)
+				$query_params{$key} = $value;
+			}
+		}
+
+		$uri->query_form(%existing_params, %query_params) if %query_params;
+		$url = $uri->as_string;
+	}
 
 	$self->log->debug("Getting loader status from: $url");
 
