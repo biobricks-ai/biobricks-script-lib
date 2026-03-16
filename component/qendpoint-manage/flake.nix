@@ -13,27 +13,9 @@
 
 	outputs = { self, nixpkgs, flake-utils, nix-qendpoint }:
 		let
-			# Map of Perl package names to their .nix file base names
-			perlPackageMap = {
-				LogAnyAdapterScreen   = "log-any-adapter-screen";
-				TextTableTiny         = "text-table-tiny";
-				StringTtyLength       = "string-ttylength";
-				UnicodeEastAsianWidth = "unicode-eastasianwidth";
-				SyntaxConstruct       = "syntax-construct";
-				DockerNamesRandom     = "docker-names-random";
-				GetoptLong            = "getopt-long";
-				GetoptLongDescriptive = "getopt-long-descriptive";
-				FileSymlinkRelative   = "file-symlink-relative";
-				Test2ToolsLoadModule  = "test2-tools-loadmodule";
-			};
+			perlPkgs = import ../../maint/nixpkg/perl-package.nix;
 		in {
-			overlays.default = final: prev: {
-				perlPackages = prev.perlPackages // (
-					nixpkgs.lib.mapAttrs
-						(name: nixFile: final.callPackage ../../maint/nixpkg/perl/${nixFile}.nix {})
-						perlPackageMap
-				);
-			};
+			overlays.default = perlPkgs.mkPerlPackagesOverlay nixpkgs;
 		} //
 		flake-utils.lib.eachDefaultSystem (system:
 			let

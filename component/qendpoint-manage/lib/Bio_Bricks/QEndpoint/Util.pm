@@ -23,14 +23,14 @@ package Bio_Bricks::QEndpoint::Util {
 	}
 
 	sub generate_instance_id {
-		my $dnr = Docker::Names::Random->new();
+		my $dnr = Docker::Names::Random->new;
 
 		my $instances_dir = $Bio_Bricks::QEndpoint::App::CONFIG_DIR->child('instance');
 		$instances_dir->mkpath;
 
 		# Try to get a unique name
 		for my $attempt (1..10) {
-			my $nice_name = $dnr->docker_name();
+			my $nice_name = $dnr->docker_name;
 			$nice_name =~ s/_/-/g;
 
 			# After some attempts, enable timestamp suffix flag
